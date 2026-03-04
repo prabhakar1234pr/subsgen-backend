@@ -48,14 +48,26 @@ API will be at `https://subsgen-api.fly.dev` (or your chosen app name).
 
 ### CI/CD (GitHub Actions → GCP VM)
 
-On push to `main`, `.github/workflows/gcp-deploy.yml` deploys to the VM via SSH.
+On push to `main`, `.github/workflows/gcp-deploy.yml` deploys via `gcloud compute ssh`.
 
 **Setup:**
 
-1. Generate a deploy key: `ssh-keygen -t ed25519 -C "gcp-deploy" -f deploy_key -N ""`
-2. Add the **public** key to the VM: `gcloud compute ssh subsgen-vm --zone=us-central1-a --command="mkdir -p ~/.ssh && echo '$(cat deploy_key.pub)' >> ~/.ssh/authorized_keys"`
+1. Create a GCP service account with **Compute Instance Admin (v1)** role:
+   ```bash
+   gcloud iam service-accounts create github-deploy --display-name="GitHub Deploy"
+   gcloud projects add-iam-policy-binding subsgen-backend-488200 \
+     --member="serviceAccount:github-deploy@subsgen-backend-488200.iam.gserviceaccount.com" \
+     --role="roles/compute.instanceAdmin.v1"
+   ```
+
+2. Create and download a JSON key:
+   ```bash
+   gcloud iam service-accounts keys create key.json \
+     --iam-account=github-deploy@subsgen-backend-488200.iam.gserviceaccount.com
+   ```
+
 3. Add GitHub Secrets (repo → Settings → Secrets and variables → Actions):
-   - `GCP_SSH_KEY`: contents of `deploy_key` (private key)
-   - `GCP_SSH_HOST`: `prabh@34.121.45.9` (use your VM username)
+   - `GCP_SA_KEY`: paste the entire contents of `key.json`
    - `GROQ_API_KEY`: your Groq API key
-4. Delete `deploy_key` and `deploy_key.pub` locally after adding secrets.
+
+4. Delete `key.json` after adding the secret.
