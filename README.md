@@ -1,13 +1,4 @@
----
-title: Instagram Subtitles API
-emoji: 🎬
-colorFrom: purple
-colorTo: pink
-sdk: docker
-app_port: 7860
----
-
-# Instagram Subtitles API
+# SubsGen API
 
 FastAPI backend for generating Instagram-style viral subtitles on talking head videos.
 
@@ -26,7 +17,16 @@ FastAPI backend for generating Instagram-style viral subtitles on talking head v
 - `POST /api/process-reel` - Multiple videos → ZIP of subtitled MP4s
 - `POST /api/reel-pipeline` - Raw clips → AI reel (MP4 + caption header)
 
-## Secrets (Space Settings)
+## Local Setup
 
-Add `GROQ_API_KEY_1`, `GROQ_API_KEY_2`, `GROQ_API_KEY_3` (or `GROQ_API_KEY`) as Secrets for full AI pipeline.
+```bash
+cp .env.example .env
+# Add GROQ_API_KEY (or GROQ_API_KEY_1, GROQ_API_KEY_2, GROQ_API_KEY_3) to .env
 
+uv sync
+uv run uvicorn main:app --reload --port 7860
+```
+
+## Deploy to Fly.io
+
+See [Fly.io Setup](#flyio-setup) below.

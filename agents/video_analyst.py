@@ -106,7 +106,7 @@ def analyze_clip(video_path: Path, transcript: dict, clip_index: int = 0) -> dic
     })
 
     try:
-        logger.info(f"[VLM] Analyzing clip {clip_index+1} visually...")
+        logger.info(f"[VLM] Clip {clip_index+1}: Analyzing {len(frames)} frames | transcript={transcript_preview[:60]}...")
         client = Groq(api_key=next_key())
         response = client.chat.completions.create(
             model=VLM_MODEL,

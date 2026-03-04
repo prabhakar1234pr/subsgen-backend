@@ -15,14 +15,14 @@ class TranscriptionService:
     def load_model(self):
         """Load faster-whisper model (lazy loading to save memory)."""
         if self.model is None:
-            logger.info(f"Loading faster-whisper model: {self.model_name}")
+            logger.info(f"[TRANSCRIPTION] Loading faster-whisper model: {self.model_name}")
             # Use CPU with int8 quantization for speed
             self.model = WhisperModel(
                 self.model_name,
                 device="cpu",
                 compute_type="int8",  # Faster on CPU
             )
-            logger.info("Model loaded successfully")
+            logger.info("[TRANSCRIPTION] Model loaded successfully")
 
     def transcribe(self, audio_path: Path) -> list[dict]:
         """

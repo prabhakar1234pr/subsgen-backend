@@ -1,7 +1,10 @@
+import logging
 import os
 import tempfile
 import uuid
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class TempFileHandler:
@@ -26,6 +29,7 @@ class TempFileHandler:
 
     def cleanup(self):
         """Remove all temporary files from this session."""
+        logger.debug(f"[FILE] cleanup: {len(self.session_files)} files")
         for path in self.session_files:
             try:
                 if path.exists():

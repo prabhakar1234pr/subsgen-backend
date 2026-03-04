@@ -7,7 +7,7 @@ POST /api/reel-pipeline/caption  (returns last caption, no video)
 Full AI pipeline:
   Agent 1 — Groq Whisper Large v3       (transcribe each clip)
   Agent 2 — Groq Llama 4 Scout VLM      (visual analysis per clip)
-  Agent 3 — Groq Llama 3.3 70B Brain    (narrative + edit plan + caption)
+  Agent 3 — HolisticReviewer + EditDirector (CrewAI Flow)
   Agent 4 — Groq Llama 3.3 70B + Internet Archive (find + download music)
   FFmpeg  — precise trim, 9:16, concat, mix music, burn subs
   → returns reel.mp4 + X-Caption header
@@ -19,46 +19,25 @@ import os
 import time
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 
-from agents.crew             import run_ai_pipeline
+from agents.flows            import run_reel_flow
 from agents.key_manager      import has_keys, key_count
-from services.subtitle       import generate_ass_subtitles, burn_subtitles
+from services.subtitle       import generate_ass_subtitles, burn_subtitles, get_video_duration
 from services.video_editor   import produce_reel
+from services.audio_master   import mix_with_ducking
 from services.music_selector import mix_music
 from utils.file_handler      import TempFileHandler
 
 logger     = logging.getLogger(__name__)
 router     = APIRouter()
 MAX_MB     = 500
-_last_caption = {}   # simple in-memory store for last caption
-
-
-def _mix_music(video_path, music_path, out, vol=0.10, fade_in=1.0, fade_out=2.0):
-    import subprocess
-    r = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)],
-        capture_output=True, text=True, check=True)
-    dur = float(r.stdout.strip())
-    fs  = max(0.0, dur - fade_out)
-    fc  = (
-        f"[1:a]aloop=loop=-1:size=2e+09,atrim=duration={dur},"
-        f"volume={vol},afade=t=in:st=0:d={fade_in},"
-        f"afade=t=out:st={fs:.3f}:d={fade_out}[music];"
-        f"[0:a][music]amix=inputs=2:duration=first:dropout_transition=2[aout]"
-    )
-    subprocess.run([
-        "ffmpeg", "-i", str(video_path), "-i", str(music_path),
-        "-filter_complex", fc,
-        "-map", "0:v", "-map", "[aout]",
-        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-        "-shortest", "-movflags", "+faststart", "-y", str(out),
-    ], check=True, capture_output=True)
+MAX_TOTAL_DURATION_SEC = 300  # 5 minutes
 
 
 @router.get("/reel-pipeline/status")
 async def pipeline_status():
+    logger.info("[PIPELINE] GET /reel-pipeline/status")
     return {
         "groq_keys_loaded": key_count(),
         "groq_ready":       has_keys(),
@@ -72,13 +51,6 @@ async def pipeline_status():
     }
 
 
-@router.get("/reel-pipeline/last-caption")
-async def get_last_caption():
-    if not _last_caption:
-        return JSONResponse({"error": "No caption generated yet"}, status_code=404)
-    return JSONResponse(_last_caption)
-
-
 @router.post("/reel-pipeline")
 async def process_reel_pipeline(
     background_tasks: BackgroundTasks,
@@ -87,9 +59,8 @@ async def process_reel_pipeline(
     """
     Upload raw clips → AI pipeline → one finished reel.mp4
     Caption is returned in X-Caption response header (JSON encoded).
-    Also available via GET /api/reel-pipeline/last-caption
     """
-    global _last_caption
+    logger.info(f"[PIPELINE] POST /reel-pipeline | videos={len(videos)}")
     if not videos:
         raise HTTPException(status_code=400, detail="No videos uploaded")
 
@@ -98,7 +69,7 @@ async def process_reel_pipeline(
 
     try:
         # ── 1. Save uploads ────────────────────────────────────────────
-        logger.info(f"[PIPELINE] Saving {len(videos)} uploads...")
+        logger.info(f"[PIPELINE] Step 1: Saving {len(videos)} uploads...")
         clip_paths, total_bytes = [], 0
         for v in videos:
             content      = await v.read()
@@ -107,13 +78,21 @@ async def process_reel_pipeline(
                 raise HTTPException(status_code=400, detail=f"Total upload must be under {MAX_MB}MB")
             ext = os.path.splitext(v.filename or ".mp4")[1] or ".mp4"
             clip_paths.append(handler.save_upload(content, ext))
-        logger.info(f"[PIPELINE] Saved {total_bytes/1024/1024:.1f}MB")
+        logger.info(f"[PIPELINE] Step 1 done: Saved {total_bytes/1024/1024:.1f}MB | paths={[p.name for p in clip_paths]}")
 
-        # ── 2. Run 4-agent AI pipeline ─────────────────────────────────
-        logger.info("[PIPELINE] Starting 4-agent AI pipeline...")
+        # ── 1b. Validate total duration ─────────────────────────────────
+        total_duration = sum(get_video_duration(p) for p in clip_paths)
+        if total_duration > MAX_TOTAL_DURATION_SEC:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Total duration must be under 5 minutes (current: {total_duration:.1f}s)",
+            )
+
+        # ── 2. Run CrewAI Flow (6-step AI pipeline) ────────────────────
+        logger.info("[PIPELINE] Step 2: Starting 4-agent AI pipeline...")
         t_ai     = time.time()
-        blueprint = run_ai_pipeline(clip_paths)
-        logger.info(f"[PIPELINE] AI pipeline done in {time.time()-t_ai:.1f}s")
+        blueprint = run_reel_flow(clip_paths)
+        logger.info(f"[PIPELINE] Step 2 done: AI pipeline in {time.time()-t_ai:.1f}s | clips={len(blueprint.get('ordered_clips', []))} | words={len(blueprint.get('all_words', []))}")
 
         ordered_clips  = blueprint["ordered_clips"]
         subtitle_style = blueprint["subtitle_style"]
@@ -122,25 +101,30 @@ async def process_reel_pipeline(
         caption        = blueprint["caption"]
         edit_plan      = blueprint["edit_plan"]
 
-        _last_caption = caption   # store for later retrieval
-
         if not ordered_clips:
+            logger.error("[PIPELINE] Brain cut all clips — no content to produce")
             raise HTTPException(400, "Brain decided all clips should be cut — please upload better content")
 
         # ── 3. FFmpeg: trim + reframe + concat ─────────────────────────
         t_edit   = time.time()
-        logger.info(f"[PIPELINE] Producing reel: {len(ordered_clips)} clips...")
+        logger.info(f"[PIPELINE] Step 3: Producing reel: {len(ordered_clips)} clips | style={subtitle_style} | music={'yes' if music_path else 'fallback'}")
         stitched = handler.create_temp_path(".mp4")
         produce_reel(ordered_clips, stitched)
-        for p, _, _ in ordered_clips:
-            handler.cleanup_file(p)
-        logger.info(f"[PIPELINE] Reel produced in {time.time()-t_edit:.1f}s")
+        for item in ordered_clips:
+            handler.cleanup_file(item[0])
+        logger.info(f"[PIPELINE] Step 3 done: Reel produced in {time.time()-t_edit:.1f}s")
 
-        # ── 4. Mix music ───────────────────────────────────────────────
+        # ── 4. Mix music (with ducking when speech present) ──────────────
         with_music = handler.create_temp_path(".mp4")
         if music_path and music_path.exists():
-            logger.info("[PIPELINE] Mixing downloaded music...")
-            _mix_music(stitched, music_path, with_music)
+            logger.info("[PIPELINE] Mixing music with ducking...")
+            mix_with_ducking(
+                stitched, music_path, all_words, with_music,
+                music_volume=float(edit_plan.get("music_volume", 0.12)),
+                duck_strength=edit_plan.get("duck_strength", "medium"),
+                fade_in=float(edit_plan.get("music_fade_in_sec", 1.0)),
+                fade_out=float(edit_plan.get("music_fade_out_sec", 2.0)),
+            )
             music_path.unlink(missing_ok=True)
         else:
             logger.info(f"[PIPELINE] No downloaded music — using bundled fallback (mood={edit_plan.get('music_mood','motivational')})")
@@ -149,6 +133,7 @@ async def process_reel_pipeline(
 
         # ── 5. Burn subtitles (using Brain's pre-computed word list) ───
         t_subs = time.time()
+        logger.info(f"[PIPELINE] Step 5: Burning subtitles | words={len(all_words)} | style={subtitle_style}")
         if not all_words:
             logger.warning("[PIPELINE] No words from Brain — subtitles skipped")
             final = with_music
@@ -164,7 +149,7 @@ async def process_reel_pipeline(
 
         size_mb = os.path.getsize(final) / 1024 / 1024
         logger.info(f"[PIPELINE COMPLETE] {size_mb:.1f}MB in {time.time()-wall:.1f}s total")
-        logger.info(f"[PIPELINE] Caption: \"{caption.get('hook','')}\"")
+        logger.info(f"[PIPELINE] Caption hook: \"{caption.get('hook','')}\" | CTA: \"{caption.get('cta','')}\"")
 
         # Encode caption into response header so frontend can display it
         caption_header = json.dumps(caption, ensure_ascii=False)
@@ -184,6 +169,23 @@ async def process_reel_pipeline(
         )
 
     except HTTPException:
+        handler.cleanup()
+        raise
+    except FileNotFoundError:
+        logger.error("[PIPELINE ERROR] FFmpeg/ffprobe not found")
+        handler.cleanup()
+        raise HTTPException(
+            500,
+            "FFmpeg not found. Install from https://ffmpeg.org/download.html and add the bin folder to your PATH."
+        )
+    except OSError as e:
+        if e.errno == 2:
+            logger.error("[PIPELINE ERROR] FFmpeg/ffprobe not found")
+            handler.cleanup()
+            raise HTTPException(
+                500,
+                "FFmpeg not found. Install from https://ffmpeg.org/download.html and add the bin folder to your PATH."
+            )
         handler.cleanup()
         raise
     except Exception as e:

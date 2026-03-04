@@ -62,18 +62,16 @@ The video director wants this music vibe:
   Energy level:  {overall_energy}
   Content type:  {content_type}
   Reel hook:     "{caption_hook}"
+  Creative brief: "{music_creative_brief}"
 
 Your job: produce the best 3-5 word search query for the Internet Archive audio library.
 The library has CC0/public domain instrumental background music.
 Think: what keywords best describe the SOUND you want, not the content topic.
+If the creative brief asks for "unusual" or "contrasting" music (e.g. chill over intense speech), honor that.
 
-Examples of good queries:
-  "upbeat motivational background instrumental"
-  "calm lofi study music"
-  "epic cinematic background"
-  "happy energetic upbeat"
+Examples: "upbeat motivational instrumental", "calm lofi study", "epic cinematic", "happy energetic upbeat"
 
-Respond ONLY with JSON — no explanation, no markdown:
+Respond ONLY with JSON — no markdown:
 {{"search_query": "your 3-5 word query", "reason": "one sentence"}}"""
 
 
@@ -88,11 +86,12 @@ def _refine_query(edit_plan: dict) -> str:
     caption = edit_plan.get("caption", {})
     clips   = edit_plan.get("clips", [{}])
     prompt  = REFINE_PROMPT.format(
-        music_search_query = edit_plan.get("music_search_query", fallback),
-        overall_mood       = edit_plan.get("overall_mood", "motivational"),
-        overall_energy     = edit_plan.get("overall_energy", "medium"),
-        content_type       = clips[0].get("content_type", "talking_head") if clips else "talking_head",
-        caption_hook       = caption.get("hook", ""),
+        music_search_query   = edit_plan.get("music_search_query", fallback),
+        overall_mood         = edit_plan.get("overall_mood", "motivational"),
+        overall_energy       = edit_plan.get("overall_energy", "medium"),
+        content_type         = clips[0].get("content_type", "talking_head") if clips else "talking_head",
+        caption_hook         = caption.get("hook", ""),
+        music_creative_brief = edit_plan.get("music_creative_brief", ""),
     )
 
     try:
@@ -296,7 +295,7 @@ def find_and_download_music(edit_plan: dict, output_dir: Path) -> Path | None:
 
     Returns path to downloaded MP3, or None if nothing found.
     """
-    logger.info("[MusicSupervisor] Starting music search (Internet Archive, CC0 only)...")
+    logger.info("[MusicSupervisor] Starting | mood=%s | energy=%s | query=%s", edit_plan.get("overall_mood"), edit_plan.get("overall_energy"), edit_plan.get("music_search_query", "")[:50])
 
     # Step 1 — refine query
     query = _refine_query(edit_plan)

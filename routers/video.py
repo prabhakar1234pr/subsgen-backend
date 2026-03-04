@@ -12,8 +12,6 @@ from services.subtitle import generate_ass_subtitles, burn_subtitles, extract_au
 from services.subtitle import copy_video, get_video_duration
 from utils.file_handler import TempFileHandler
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -36,6 +34,7 @@ async def process_video(
     4. Burn subtitles onto video
     5. Return processed video
     """
+    logger.info(f"[VIDEO] POST /process | file={video.filename} | style={style} | content_type={video.content_type}")
     # Validate file type
     if not video.content_type or not video.content_type.startswith("video/"):
         raise HTTPException(status_code=400, detail="File must be a video")
@@ -51,7 +50,7 @@ async def process_video(
         video_ext = os.path.splitext(video.filename or ".mp4")[1]
         video_path = file_handler.save_upload(video_content, video_ext)
         file_size_mb = len(video_content) / (1024 * 1024)
-        logger.info(f"[STEP 1/5] DONE - Saved {file_size_mb:.2f}MB in {time.time() - step_start:.2f}s")
+        logger.info(f"[STEP 1/5] DONE - Saved {file_size_mb:.2f}MB ({len(video_content)} bytes) in {time.time() - step_start:.2f}s")
 
         duration = get_video_duration(video_path)
         if duration > MAX_TOTAL_DURATION_SEC:
@@ -103,7 +102,7 @@ async def process_video(
         file_handler.cleanup_file(subtitle_path)
 
         total_time = time.time() - total_start
-        logger.info(f"[SUCCESS] Total processing time: {total_time:.2f}s")
+        logger.info(f"[SUCCESS] Total processing time: {total_time:.2f}s | output={output_size_mb:.2f}MB")
 
         # Return the processed video; cleanup after response is sent
         background_tasks.add_task(file_handler.cleanup_file, output_path)
@@ -117,6 +116,23 @@ async def process_video(
         logger.error(f"[ERROR] HTTPException after {time.time() - total_start:.2f}s")
         file_handler.cleanup()
         raise
+    except FileNotFoundError as e:
+        logger.error(f"[ERROR] FileNotFoundError: {e}")
+        file_handler.cleanup()
+        raise HTTPException(
+            status_code=500,
+            detail="FFmpeg not found. Install from https://ffmpeg.org/download.html and add the bin folder to your PATH."
+        )
+    except OSError as e:
+        if e.errno == 2:  # ENOENT - file not found
+            logger.error(f"[ERROR] FFmpeg/ffprobe not found: {e}")
+            file_handler.cleanup()
+            raise HTTPException(
+                status_code=500,
+                detail="FFmpeg not found. Install from https://ffmpeg.org/download.html and add the bin folder to your PATH."
+            )
+        file_handler.cleanup()
+        raise
     except Exception as e:
         logger.error(f"[ERROR] Processing failed after {time.time() - total_start:.2f}s: {str(e)}")
         file_handler.cleanup()
@@ -128,6 +144,7 @@ async def process_reel(
     videos: list[UploadFile] = File(...),
     style: str = Form("hormozi")
 ):
+    logger.info(f"[VIDEO] POST /process-reel | count={len(videos)} | style={style}")
     """
     Process multiple videos at once:
     1. Extract audio from each
@@ -136,12 +153,15 @@ async def process_reel(
     4. Burn subtitles onto each video
     5. Return ZIP with all processed videos
     """
+    video_contents: list[tuple[str, bytes]] = []
     total_size = 0
-    for v in videos:
+    for i, v in enumerate(videos):
         if not v.content_type or not v.content_type.startswith("video/"):
             raise HTTPException(status_code=400, detail=f"File must be a video: {v.filename}")
-        v.content = await v.read()
-        total_size += len(v.content)
+        key = v.filename or f"video_{i}.mp4"
+        content = await v.read()
+        video_contents.append((key, content))
+        total_size += len(content)
 
     if total_size > MAX_TOTAL_SIZE_MB * 1024 * 1024:
         raise HTTPException(
@@ -153,9 +173,9 @@ async def process_reel(
 
     # Check total duration (must save files first to probe)
     total_duration = 0.0
-    for v in videos:
-        video_ext = os.path.splitext(v.filename or ".mp4")[1]
-        temp_path = file_handler.save_upload(v.content, video_ext)
+    for key, content in video_contents:
+        video_ext = os.path.splitext(key)[1]
+        temp_path = file_handler.save_upload(content, video_ext)
         try:
             total_duration += get_video_duration(temp_path)
         finally:
@@ -184,7 +204,7 @@ async def process_reel(
             words = transcription_service.transcribe(audio_path)
             output_path = file_handler.create_temp_path(".mp4")
             if not words:
-                logger.warning(f"[{i+1}/{len(videos)}] No speech in {video.filename}, copying without subtitles")
+                logger.warning(f"[{i+1}/{len(video_contents)}] No speech in {key}, copying without subtitles")
                 copy_video(video_path, output_path)
             else:
                 subtitle_path = file_handler.create_temp_path(".ass")
@@ -209,7 +229,7 @@ async def process_reel(
 
         zip_buffer.seek(0)
         total_time = time.time() - total_start
-        logger.info(f"[SUCCESS] Processed {len(videos)} videos in {total_time:.2f}s")
+        logger.info(f"[SUCCESS] Processed {len(video_contents)} videos in {total_time:.2f}s")
 
         return Response(
             content=zip_buffer.getvalue(),
@@ -219,6 +239,22 @@ async def process_reel(
 
     except HTTPException:
         file_handler.cleanup()
+        raise
+    except FileNotFoundError:
+        logger.error("[ERROR] FFmpeg/ffprobe not found")
+        file_handler.cleanup()
+        raise HTTPException(
+            status_code=500,
+            detail="FFmpeg not found. Install from https://ffmpeg.org/download.html and add the bin folder to your PATH."
+        )
+    except OSError as e:
+        if e.errno == 2:
+            logger.error("[ERROR] FFmpeg/ffprobe not found")
+            file_handler.cleanup()
+            raise HTTPException(
+                status_code=500,
+                detail="FFmpeg not found. Install from https://ffmpeg.org/download.html and add the bin folder to your PATH."
+            )
         raise
     except Exception as e:
         logger.error(f"[ERROR] Batch processing failed: {str(e)}")

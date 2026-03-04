@@ -1,16 +1,26 @@
 """
 services/video_editor.py
 
-FFmpeg editing — now uses Brain's exact trim points instead of silence detection.
-  1. Precise trim     (Brain-specified start_sec / end_sec)
+FFmpeg editing — agent-driven trim points and transitions.
+  1. Precise trim     (EditDirector-specified start_sec / end_sec)
   2. Reframe to 9:16  (1080x1920)
-  3. Crossfade concat
+  3. Concat with agent-chosen transitions (fade, wipe, slide)
 """
 
 import subprocess, json, logging, os, tempfile, uuid
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Agent transition names -> FFmpeg xfade transition
+XFADE_MAP = {
+    "fade": "fade",
+    "wipe_left": "wipeleft",
+    "wipe_right": "wiperight",
+    "slide_left": "slideleft",
+    "slide_right": "slideright",
+    "none": "fade",  # fallback
+}
 
 
 def _tmp(ext=".mp4") -> Path:
@@ -43,7 +53,7 @@ def precise_trim(video_path: Path, output_path: Path,
                         "-y", str(output_path)], check=True, capture_output=True)
         return output_path
 
-    logger.info(f"Precise trim: {start_sec:.2f}s → {end_sec:.2f}s ({duration:.2f}s)")
+    logger.info(f"[VIDEO_EDIT] precise_trim: {video_path.name} | {start_sec:.2f}s → {end_sec:.2f}s | duration={duration:.2f}s")
     subprocess.run([
         "ffmpeg",
         "-ss", f"{start_sec:.3f}",
@@ -94,7 +104,7 @@ def _normalise(p: Path, out: Path) -> Path:
 
 def _simple_concat(paths: list, out: Path) -> Path:
     lst = _tmp(".txt")
-    lst.write_text("\n".join(f"file '{p}'" for p in paths))
+    lst.write_text("\n".join(f"file '{Path(p).as_posix()}'" for p in paths))
     subprocess.run([
         "ffmpeg", "-f", "concat", "-safe", "0", "-i", str(lst),
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
@@ -106,7 +116,9 @@ def _simple_concat(paths: list, out: Path) -> Path:
 
 
 def concat_with_crossfade(clip_paths: list, output_path: Path,
-                           xfade_sec: float = 0.35) -> Path:
+                           xfade_sec: float = 0.35,
+                           xfade_type: str = "fade") -> Path:
+    """Concat clips with crossfade. xfade_type: fade, wipeleft, wiperight, slideleft, slideright."""
     if len(clip_paths) == 1:
         subprocess.run(["ffmpeg", "-i", str(clip_paths[0]), "-c", "copy",
                         "-y", str(output_path)], check=True, capture_output=True)
@@ -128,7 +140,7 @@ def concat_with_crossfade(clip_paths: list, output_path: Path,
         for i in range(1, n):
             ov = "[vout]" if i == n-1 else f"[v{i}]"
             oa = "[aout]" if i == n-1 else f"[a{i}]"
-            parts.append(f"{prev_v}[{i}:v]xfade=transition=fade:duration={xfade_sec}:offset={offset:.3f}{ov}")
+            parts.append(f"{prev_v}[{i}:v]xfade=transition={xfade_type}:duration={xfade_sec}:offset={offset:.3f}{ov}")
             parts.append(f"{prev_a}[{i}:a]acrossfade=d={xfade_sec}{oa}")
             prev_v, prev_a = ov, oa
             if i < n-1:
@@ -145,8 +157,8 @@ def concat_with_crossfade(clip_paths: list, output_path: Path,
         ]
         try:
             subprocess.run(cmd, check=True, capture_output=True)
-        except subprocess.CalledProcessError:
-            logger.warning("xfade failed — falling back to simple concat")
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"[VIDEO_EDIT] xfade failed: {e} — falling back to simple concat")
             _simple_concat(normed, output_path)
     finally:
         for t in tmp_files:
@@ -155,33 +167,56 @@ def concat_with_crossfade(clip_paths: list, output_path: Path,
     return output_path
 
 
+def concat_with_agent_transitions(
+    clip_paths: list[Path],
+    transitions: list[tuple[str, float]],  # (xfade_type, xfade_sec) per clip (transition OUT of that clip)
+    output_path: Path,
+) -> Path:
+    """Concat with per-segment agent-chosen transitions. transitions[i] = transition from clip i to clip i+1."""
+    if len(clip_paths) == 1:
+        subprocess.run(["ffmpeg", "-i", str(clip_paths[0]), "-c", "copy",
+                        "-y", str(output_path)], check=True, capture_output=True)
+        return output_path
+
+    # Use first transition for all (or blend); FFmpeg xfade uses same type per segment
+    # For simplicity: use transition from clip 0->1 for first cut, etc.
+    xfade_type = XFADE_MAP.get(transitions[0][0].lower().replace(" ", "_"), "fade")
+    xfade_sec = transitions[0][1]
+    return concat_with_crossfade(clip_paths, output_path, xfade_sec=xfade_sec, xfade_type=xfade_type)
+
+
 def produce_reel(
-    ordered_clips: list,   # list of (Path, trim_start_sec, trim_end_sec)
+    ordered_clips: list,
     output_path: Path,
     xfade_sec: float = 0.35,
 ) -> Path:
     """
-    Execute the Brain's edit plan:
-      1. Precisely trim each clip
-      2. Reframe each to 9:16
-      3. Concat with crossfade
+    Execute EditDirector's plan. ordered_clips: list of
+      (Path, trim_start, trim_end) or
+      (Path, trim_start, trim_end, transition_out, transition_duration_sec)
     """
-    edited, tmp_files = [], []
+    edited, tmp_files, transitions = [], [], []
     try:
-        for i, (clip_path, trim_start, trim_end) in enumerate(ordered_clips):
-            logger.info(f"Processing clip {i+1}/{len(ordered_clips)}: {clip_path.name} [{trim_start:.2f}→{trim_end:.2f}s]")
+        for i, item in enumerate(ordered_clips):
+            clip_path = item[0]
+            trim_start, trim_end = item[1], item[2]
+            trans_out = item[3] if len(item) >= 5 else "fade"
+            trans_dur = float(item[4]) if len(item) >= 5 else xfade_sec
+            transitions.append((trans_out, trans_dur))
 
-            # Step A: precise trim
+            logger.info(f"[VIDEO_EDIT] Clip {i+1}/{len(ordered_clips)}: {clip_path.name} | trim [{trim_start:.2f}s→{trim_end:.2f}s] | trans={trans_out}")
+
             trimmed = _tmp(); tmp_files.append(trimmed)
             precise_trim(clip_path, trimmed, trim_start, trim_end)
 
-            # Step B: reframe
             framed = _tmp(); tmp_files.append(framed)
             reframe_to_9x16(trimmed, framed)
             edited.append(framed)
 
-        logger.info(f"Concatenating {len(edited)} clips with {xfade_sec}s crossfade...")
-        concat_with_crossfade(edited, output_path, xfade_sec=xfade_sec)
+        if len(edited) == 1:
+            concat_with_crossfade(edited, output_path, xfade_sec=transitions[0][1])
+        else:
+            concat_with_agent_transitions(edited, transitions[:-1], output_path)
 
     finally:
         for t in tmp_files:

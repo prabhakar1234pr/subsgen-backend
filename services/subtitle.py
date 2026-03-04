@@ -1,5 +1,8 @@
+import logging
 import subprocess
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def get_video_duration(video_path: Path) -> float:
@@ -84,6 +87,7 @@ def generate_ass_subtitles(words: list[dict], output_path: Path, style: str = "h
     
     Supports multiple styles for different looks.
     """
+    logger.info(f"[SUBTITLE] generate_ass_subtitles | words={len(words)} | style={style} | out={output_path.name}")
     # Get style config or default to hormozi
     style_config = SUBTITLE_STYLES.get(style, SUBTITLE_STYLES["hormozi"])
     
@@ -153,7 +157,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     # Write ASS file
     ass_content = ass_header + "\n".join(events)
     output_path.write_text(ass_content, encoding="utf-8")
-    
+    logger.debug(f"[SUBTITLE] Wrote {len(events)} events to {output_path.name}")
     return output_path
 
 
@@ -168,6 +172,7 @@ def burn_subtitles(
     
     Returns path to output video.
     """
+    logger.info(f"[SUBTITLE] burn_subtitles | video={video_path.name} | subs={subtitle_path.name} | out={output_path.name}")
     # FFmpeg command - maximum speed optimizations
     cmd = [
         "ffmpeg",
@@ -205,6 +210,7 @@ def copy_video(video_path: Path, output_path: Path) -> Path:
 
 def extract_audio(video_path: Path, audio_path: Path) -> Path:
     """Extract audio from video for transcription. Optimized for speed."""
+    logger.debug(f"[SUBTITLE] extract_audio | video={video_path.name} -> {audio_path.name}")
     cmd = [
         "ffmpeg",
         "-i", str(video_path),

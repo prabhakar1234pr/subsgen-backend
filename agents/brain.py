@@ -1,65 +1,53 @@
 """
 agents/brain.py
 
-Agent 3 — The Brain (Director + Narrative Planner)
+Agent 3 — EditDirector (Brain)
 Uses Llama 3.3 70B via Groq.
 
-This is the core intelligence of the system. It:
-  - Reads ALL transcripts (what is being said)
-  - Reads ALL VLM analyses (what is being shown)
-  - Scores each clip (keep vs cut)
-  - Decides narrative order (hook -> value -> CTA)
-  - Decides EXACT trim points per clip (start_sec, end_sec)
-  - Picks subtitle style based on content personality
-  - Writes caption + hashtags
-  - Instructs music supervisor on mood
+Creative, generative edit planning:
+  - Reads holistic review + transcripts + VLM analyses
+  - Scores clips, decides order, trim points
+  - Picks transitions per segment (fade, wipe, slide)
+  - Creative direction, music params, caption
 """
 
 import json
 import logging
 from groq import Groq
 from agents.key_manager import next_key, has_keys
+from agents.schemas import ensure_clip_edit_fields, ensure_edit_plan_fields
 
 logger = logging.getLogger(__name__)
 LLM_MODEL = "llama-3.3-70b-versatile"
 
-BRAIN_PROMPT = """You are an elite Instagram Reels director and content strategist.
+BRAIN_PROMPT = """You are an elite Instagram Reels director. Be CREATIVE. Surprise the viewer.
+Don't always put the obvious hook first. Consider unconventional order. Pick transitions that match the energy of each cut.
 
 You have {n_clips} raw video clip(s) to turn into ONE viral Instagram Reel.
-Below is everything you know about each clip — its transcript AND visual analysis.
+{holistic_context}
 
 ═══════════════════════════════════════
 CLIP DATA:
 {clip_data_json}
 ═══════════════════════════════════════
 
-Your job is to produce a complete, precise EditPlan.
+Your job: produce a complete, creative EditPlan.
 
-SCORING RULES:
-- Score each clip 1-10 for "keep_score". Score below 4 = cut the clip entirely.
-- A clip with no speech (has_speech=false) can still be kept if visual_score >= 7.
-- Prefer clips with strong hooks, clear speech, good lighting.
+SCORING: keep_score 1-10. Below 4 = cut. Prefer strong hooks, clear speech, good lighting.
 
-NARRATIVE RULES:
-- Hook first: the most attention-grabbing moment goes at the start (first 3 seconds matter most)
-- Value middle: the core content/teaching/story
-- CTA end: call to action, punchline, or strong close
-- If a clip has filler at the start ("um", "so", "okay so today"), trim it — give exact start_sec
+NARRATIVE: Hook first, value middle, CTA end. Trim filler ("um", "so") — give exact start_sec/end_sec.
 
-TRIM RULES:
-- For each kept clip, specify exact start_sec and end_sec to use
-- start_sec: skip filler openers, start at the first impactful word
-- end_sec: cut before trailing silence or weak endings
-- Use the word timestamps in the transcript to be precise
-- Min clip length after trimming: 2 seconds
+TRANSITIONS (per kept clip): Pick what fits the energy.
+- transition_in: "fade" | "wipe_left" | "wipe_right" | "slide_left" | "slide_right" | "none"
+- transition_out: same options (used when cutting TO the next clip)
+- transition_duration_sec: 0.2 to 0.8
+- pacing_note: "quick_cut" | "hold" | "normal"
 
-CAPTION RULES:
-- Hook line: punchy, <10 words, no emoji in first line
-- Body: 2-3 lines of value
-- CTA: one clear action
-- Hashtags: 5 relevant niche hashtags (not generic like #reels)
+CREATIVE: creative_direction = "bold cuts" | "smooth flow" | "punchy" | "cinematic"
 
-Respond ONLY with a valid JSON object. No explanation, no markdown fences.
+MUSIC: music_volume 0.05-0.2, duck_strength "light"|"medium"|"heavy", music_creative_brief for unusual/contrasting choices.
+
+Respond ONLY with valid JSON. No markdown.
 
 {{
   "clips": [
@@ -67,28 +55,33 @@ Respond ONLY with a valid JSON object. No explanation, no markdown fences.
       "clip_index": 0,
       "keep": true,
       "keep_score": 8,
-      "keep_reason": "strong hook, clear speech",
+      "keep_reason": "strong hook",
       "narrative_role": "hook | value | cta | broll",
       "narrative_order": 0,
       "trim_start_sec": 1.4,
       "trim_end_sec": 18.2,
-      "trim_reason": "skip filler intro 'okay so', end before trailing silence"
+      "trim_reason": "skip filler",
+      "transition_in": "fade",
+      "transition_out": "fade",
+      "transition_duration_sec": 0.35,
+      "pacing_note": "normal"
     }}
   ],
   "subtitle_style": "hormozi | minimal | neon | fire | karaoke | purple",
   "subtitle_style_reason": "one sentence",
   "overall_mood": "motivational | educational | entertaining | emotional | inspirational",
   "overall_energy": "low | medium | high",
-  "music_search_query": "specific 2-4 word Pixabay search query",
+  "music_search_query": "2-4 word search query",
   "music_mood": "motivational | chill | energy | uplifting | cinematic",
   "music_bpm_preference": "slow | medium | fast",
-  "caption": {{
-    "hook": "hook line here",
-    "body": "line1\\nline2\\nline3",
-    "cta": "call to action here",
-    "hashtags": ["#niche1", "#niche2", "#niche3", "#niche4", "#niche5"]
-  }},
-  "director_notes": "2-3 sentences on the edit strategy",
+  "creative_direction": "bold cuts | smooth flow | punchy | cinematic",
+  "music_volume": 0.12,
+  "duck_strength": "light | medium | heavy",
+  "music_fade_in_sec": 1.0,
+  "music_fade_out_sec": 2.0,
+  "music_creative_brief": "optional: unusual or contrasting music idea",
+  "caption": {{"hook": "...", "body": "...", "cta": "...", "hashtags": ["#a","#b","#c","#d","#e"]}},
+  "director_notes": "2-3 sentences",
   "estimated_reel_duration_sec": 30
 }}"""
 
@@ -125,22 +118,33 @@ def _build_clip_data(transcripts: list[dict], analyses: list[dict]) -> list[dict
     return merged
 
 
-def create_edit_plan(transcripts: list[dict], analyses: list[dict]) -> dict:
+def create_edit_plan(
+    transcripts: list[dict],
+    analyses: list[dict],
+    holistic_review: dict | None = None,
+) -> dict:
     """
-    The Brain: synthesize transcripts + visual analyses into a complete EditPlan.
+    EditDirector: synthesize holistic review + transcripts + analyses into creative EditPlan.
     """
     if not has_keys():
         logger.warning("[Brain] No Groq keys — using fallback edit plan")
         return _fallback_plan(transcripts, analyses)
 
     clip_data = _build_clip_data(transcripts, analyses)
+    holistic_context = ""
+    if holistic_review and holistic_review.get("overall_impression"):
+        holistic_context = f"HOLISTIC REVIEW: {holistic_review.get('overall_impression', '')}\nPacing: {holistic_review.get('pacing_suggestion', '')}\nCreative notes: {holistic_review.get('creative_notes', '')}\n\n"
+    else:
+        holistic_context = ""
+
     prompt = BRAIN_PROMPT.format(
         n_clips=len(clip_data),
-        clip_data_json=json.dumps(clip_data, indent=2)
+        holistic_context=holistic_context,
+        clip_data_json=json.dumps(clip_data, indent=2),
     )
 
     try:
-        logger.info(f"[Brain] Analyzing {len(clip_data)} clips (transcripts + vision)...")
+        logger.info(f"[Brain] Analyzing {len(clip_data)} clips | creative edit plan (transitions, music)...")
         client = Groq(api_key=next_key())
         response = client.chat.completions.create(
             model=LLM_MODEL,
@@ -148,15 +152,15 @@ def create_edit_plan(transcripts: list[dict], analyses: list[dict]) -> dict:
                 {
                     "role": "system",
                     "content": (
-                        "You are an elite Instagram Reels director. "
-                        "You think deeply about narrative, viewer psychology, and viral content. "
+                        "You are an elite Instagram Reels director. Be creative. "
+                        "Pick transitions that match energy. Surprise the viewer. "
                         "Always respond with valid JSON only."
                     )
                 },
                 {"role": "user", "content": prompt}
             ],
             max_tokens=2000,
-            temperature=0.4,
+            temperature=0.6,
         )
         raw = response.choices[0].message.content.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
@@ -167,8 +171,9 @@ def create_edit_plan(transcripts: list[dict], analyses: list[dict]) -> dict:
         if "clips" not in plan or not plan["clips"]:
             plan["clips"] = _default_clips(transcripts)
 
-        # Ensure all clips are present, clamp times
+        # Ensure all clips are present, clamp times, add transition fields
         for clip_plan in plan["clips"]:
+            ensure_clip_edit_fields(clip_plan)
             idx = clip_plan.get("clip_index", 0)
             t = next((x for x in transcripts if x["clip_index"] == idx), None)
             if t:
@@ -180,6 +185,7 @@ def create_edit_plan(transcripts: list[dict], analyses: list[dict]) -> dict:
                     clip_plan["trim_start_sec"] = 0.0
                     clip_plan["trim_end_sec"]   = dur
 
+        ensure_edit_plan_fields(plan)
         kept = [c for c in plan["clips"] if c.get("keep", True)]
         logger.info(
             f"[Brain] Plan: {len(kept)}/{n} clips kept, "
@@ -200,24 +206,26 @@ def create_edit_plan(transcripts: list[dict], analyses: list[dict]) -> dict:
 def _default_clips(transcripts: list[dict]) -> list[dict]:
     clips = []
     for i, t in enumerate(transcripts):
-        clips.append({
-            "clip_index":      t["clip_index"],
+        c = {
+            "clip_index":      t.get("clip_index", i),
             "keep":            True,
             "keep_score":      6,
             "keep_reason":     "default — no AI scoring available",
             "narrative_role":  "value",
             "narrative_order": i,
-            "trim_start_sec":  t["words"][0]["start"] if t["words"] else 0.0,
+            "trim_start_sec":  t["words"][0]["start"] if t.get("words") else 0.0,
             "trim_end_sec":    t["duration_sec"],
             "trim_reason":     "no LLM trimming available",
-        })
+        }
+        ensure_clip_edit_fields(c)
+        clips.append(c)
     return clips
 
 
 def _fallback_plan(transcripts: list[dict], analyses: list[dict]) -> dict:
     styles = [a.get("recommended_subtitle_style", "hormozi") for a in analyses]
     style  = max(set(styles), key=styles.count) if styles else "hormozi"
-    return {
+    plan = {
         "clips":                  _default_clips(transcripts),
         "subtitle_style":         style,
         "subtitle_style_reason":  "Most common style across clips",
@@ -235,3 +243,4 @@ def _fallback_plan(transcripts: list[dict], analyses: list[dict]) -> dict:
         "director_notes":              "Sequential edit, no AI director available.",
         "estimated_reel_duration_sec": 30,
     }
+    return ensure_edit_plan_fields(plan)

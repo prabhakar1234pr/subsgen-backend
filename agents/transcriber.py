@@ -91,12 +91,12 @@ def transcribe_clip(video_path: Path, clip_index: int = 0) -> dict:
             return _empty_transcript(clip_index, video_path.name, duration)
 
         # Extract + compress audio
-        logger.info(f"[Transcriber] Extracting audio from clip {clip_index+1}: {video_path.name}")
+        logger.info(f"[Transcriber] Clip {clip_index+1}: Extracting audio from {video_path.name} | duration={duration:.1f}s")
         audio_path = _extract_audio_for_groq(video_path)
         audio_path = _compress_if_needed(audio_path)
 
         size_mb = audio_path.stat().st_size / 1024 / 1024
-        logger.info(f"[Transcriber] Audio ready: {size_mb:.1f}MB, sending to Groq Whisper...")
+        logger.info(f"[Transcriber] Clip {clip_index+1}: Audio ready {size_mb:.1f}MB, sending to Groq Whisper Large v3...")
 
         client = Groq(api_key=next_key())
 

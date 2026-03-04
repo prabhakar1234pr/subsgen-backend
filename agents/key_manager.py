@@ -28,7 +28,9 @@ if not _KEYS:
         _KEYS = [single]
 
 if not _KEYS:
-    logger.warning("No GROQ_API_KEY found in environment. AI agents will use fallback defaults.")
+    logger.warning("[KEY] No GROQ_API_KEY found in environment. AI agents will use fallback defaults.")
+else:
+    logger.info(f"[KEY] Loaded {len(_KEYS)} Groq API key(s) for round-robin")
 
 _cycle = itertools.cycle(_KEYS) if _KEYS else itertools.cycle([""])
 
