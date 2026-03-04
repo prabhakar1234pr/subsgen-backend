@@ -31,3 +31,4 @@ Thumbs.db
 
 # Environment — NEVER commit this
 .env
+key.json
