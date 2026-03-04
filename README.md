@@ -29,4 +29,10 @@ uv run uvicorn main:app --reload --port 7860
 
 ## Deploy to Fly.io
 
-See [Fly.io Setup](#flyio-setup) below.
+1. Install [Fly CLI](https://fly.io/docs/hands-on/install-flyctl/)
+2. Sign up: `fly auth signup` (or `fly auth login`)
+3. Launch: `fly launch` (from backend directory)
+4. Set secrets: `fly secrets set GROQ_API_KEY=your_key`
+5. Deploy: `fly deploy`
+
+API will be at `https://subsgen-api.fly.dev` (or your chosen app name).
