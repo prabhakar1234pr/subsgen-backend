@@ -43,11 +43,20 @@ jobs:
             echo "# Deployed $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } > .env.deploy
 
-          gcloud compute ssh ${VM} --zone=${ZONE} --project=${PROJECT} --strict-host-key-checking=no --command="mkdir -p ~/subsgen"
+          retry_ssh() {
+            for i in 1 2 3 4 5; do
+              if "$@"; then return 0; fi
+              echo "Attempt $i failed, retrying in 60s..."
+              sleep 60
+            done
+            return 1
+          }
 
-          gcloud compute scp .env.deploy ${VM}:~/subsgen/.env --zone=${ZONE} --project=${PROJECT} --strict-host-key-checking=no
+          retry_ssh gcloud compute ssh ${VM} --zone=${ZONE} --project=${PROJECT} --strict-host-key-checking=no --command="mkdir -p ~/subsgen"
 
-          gcloud compute ssh ${VM} --zone=${ZONE} --project=${PROJECT} --strict-host-key-checking=no --command="
+          retry_ssh gcloud compute scp .env.deploy ${VM}:~/subsgen/.env --zone=${ZONE} --project=${PROJECT} --strict-host-key-checking=no
+
+          retry_ssh gcloud compute ssh ${VM} --zone=${ZONE} --project=${PROJECT} --strict-host-key-checking=no --command="
             set -e
             cd ~/subsgen || { mkdir -p ~/subsgen && cd ~/subsgen; }
             if [ ! -d .git ]; then
