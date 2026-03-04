@@ -13,6 +13,7 @@ Full AI pipeline:
   → returns reel.mp4 + X-Caption header
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -89,9 +90,10 @@ async def process_reel_pipeline(
             )
 
         # ── 2. Run CrewAI Flow (6-step AI pipeline) ────────────────────
+        # Run in thread: CrewAI uses asyncio.run() which cannot run inside FastAPI's event loop
         logger.info("[PIPELINE] Step 2: Starting 4-agent AI pipeline...")
         t_ai     = time.time()
-        blueprint = run_reel_flow(clip_paths)
+        blueprint = await asyncio.to_thread(run_reel_flow, clip_paths)
         logger.info(f"[PIPELINE] Step 2 done: AI pipeline in {time.time()-t_ai:.1f}s | clips={len(blueprint.get('ordered_clips', []))} | words={len(blueprint.get('all_words', []))}")
 
         ordered_clips  = blueprint["ordered_clips"]
