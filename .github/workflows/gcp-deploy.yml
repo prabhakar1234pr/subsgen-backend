@@ -1,4 +1,5 @@
 # Deploy subsgen-backend to GCP Compute Engine VM on push to main
+# Uses Cloud Build (runs inside GCP) to avoid external SSH connection resets
 # Requires GitHub Secrets: GCP_SA_KEY, GROQ_API_KEY (or GROQ_API_KEY_1/2/3)
 
 name: GCP Deploy
@@ -12,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     concurrency: deploy-group
     steps:
+      - uses: actions/checkout@v4
+
       - uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
@@ -19,7 +22,7 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Deploy via gcloud
+      - name: Create .env and deploy via Cloud Build
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GROQ_API_KEY_1: ${{ secrets.GROQ_API_KEY_1 }}
@@ -27,11 +30,6 @@ jobs:
           GROQ_API_KEY_3: ${{ secrets.GROQ_API_KEY_3 }}
         run: |
           set -e
-          VM="subsgen-vm"
-          ZONE="us-central1-a"
-          PROJECT="subsgen-backend-488200"
-
-          # Build .env
           {
             if [ -n "$GROQ_API_KEY_1" ] || [ -n "$GROQ_API_KEY_2" ] || [ -n "$GROQ_API_KEY_3" ]; then
               echo "GROQ_API_KEY_1=$GROQ_API_KEY_1"
@@ -43,30 +41,4 @@ jobs:
             echo "# Deployed $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } > .env.deploy
 
-          retry_ssh() {
-            for i in 1 2 3 4 5; do
-              if "$@"; then return 0; fi
-              echo "Attempt $i failed, retrying in 60s..."
-              sleep 60
-            done
-            return 1
-          }
-
-          retry_ssh gcloud compute ssh ${VM} --zone=${ZONE} --project=${PROJECT} --strict-host-key-checking=no --command="mkdir -p ~/subsgen"
-
-          retry_ssh gcloud compute scp .env.deploy ${VM}:~/subsgen/.env --zone=${ZONE} --project=${PROJECT} --strict-host-key-checking=no
-
-          retry_ssh gcloud compute ssh ${VM} --zone=${ZONE} --project=${PROJECT} --strict-host-key-checking=no --command="
-            set -e
-            cd ~/subsgen || { mkdir -p ~/subsgen && cd ~/subsgen; }
-            if [ ! -d .git ]; then
-              git clone https://github.com/prabhakar1234pr/subsgen-backend.git .
-            fi
-            git fetch origin main
-            git reset --hard origin/main
-            sudo docker build -t subsgen-api .
-            sudo docker stop subsgen 2>/dev/null || true
-            sudo docker rm subsgen 2>/dev/null || true
-            sudo docker run -d --name subsgen --restart unless-stopped -p 7860:7860 --env-file .env subsgen-api
-            echo Deploy complete.
-          "
+          gcloud builds submit --config=cloudbuild.yaml --project=subsgen-backend-488200 .
