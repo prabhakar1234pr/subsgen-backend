@@ -9,6 +9,7 @@ USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg curl fonts-dejavu-core fontconfig \
     && rm -rf /var/lib/apt/lists/* && fc-cache -f -v
+RUN mkdir -p /home/user/app && chown -R user:user /home/user/app
 
 USER user
 RUN pip install --user uv
@@ -19,7 +20,7 @@ ENV PATH="/home/user/app/.venv/bin:$PATH"
 
 RUN uv pip install --python /home/user/app/.venv/bin/python \
     fastapi "uvicorn[standard]" python-multipart \
-    faster-whisper ffmpeg-python numpy \
+    ffmpeg-python numpy \
     groq httpx pillow python-dotenv \
     crewai crewai-tools langchain-groq
 

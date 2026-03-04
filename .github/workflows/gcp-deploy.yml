@@ -1,0 +1,54 @@
+# Deploy subsgen-backend to GCP Compute Engine VM on push to main
+# Requires GitHub Secrets: GCP_SSH_KEY, GCP_SSH_HOST, GROQ_API_KEY (or GROQ_API_KEY_1/2/3)
+
+name: GCP Deploy
+on:
+  push:
+    branches:
+      - main
+jobs:
+  deploy:
+    name: Deploy to GCP VM
+    runs-on: ubuntu-latest
+    concurrency: deploy-group
+    steps:
+      - name: Deploy via SSH
+        env:
+          GCP_SSH_KEY: ${{ secrets.GCP_SSH_KEY }}
+          GCP_SSH_HOST: ${{ secrets.GCP_SSH_HOST }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_API_KEY_1: ${{ secrets.GROQ_API_KEY_1 }}
+          GROQ_API_KEY_2: ${{ secrets.GROQ_API_KEY_2 }}
+          GROQ_API_KEY_3: ${{ secrets.GROQ_API_KEY_3 }}
+        run: |
+          set -e
+          mkdir -p ~/.ssh
+          echo "$GCP_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Build .env
+          {
+            if [ -n "$GROQ_API_KEY_1" ] || [ -n "$GROQ_API_KEY_2" ] || [ -n "$GROQ_API_KEY_3" ]; then
+              echo "GROQ_API_KEY_1=$GROQ_API_KEY_1"
+              echo "GROQ_API_KEY_2=$GROQ_API_KEY_2"
+              echo "GROQ_API_KEY_3=$GROQ_API_KEY_3"
+            else
+              echo "GROQ_API_KEY=$GROQ_API_KEY"
+            fi
+            echo "# Deployed $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > .env.deploy
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key "$GCP_SSH_HOST" "mkdir -p ~/subsgen"
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key .env.deploy "$GCP_SSH_HOST:~/subsgen/.env"
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key "$GCP_SSH_HOST" bash -s << 'REMOTE'
+            set -e
+            cd ~/subsgen || { mkdir -p ~/subsgen && cd ~/subsgen; }
+            if [ ! -d .git ]; then
+              git clone https://github.com/prabhakar1234pr/subsgen-backend.git .
+            fi
+            git fetch origin main
+            git reset --hard origin/main
+            sudo docker build -t subsgen-api .
+            sudo docker stop subsgen 2>/dev/null || true
+            sudo docker rm subsgen 2>/dev/null || true
+            sudo docker run -d --name subsgen --restart unless-stopped -p 7860:7860 --env-file .env subsgen-api
+            echo "Deploy complete."
+          REMOTE

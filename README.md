@@ -36,3 +36,26 @@ uv run uvicorn main:app --reload --port 7860
 5. Deploy: `fly deploy`
 
 API will be at `https://subsgen-api.fly.dev` (or your chosen app name).
+
+## Deploy to Google Cloud (e2-micro Always Free)
+
+**Project:** `subsgen-backend-488200` | **VM:** `subsgen-vm` | **IP:** `34.121.45.9`
+
+1. SSH: `gcloud compute ssh subsgen-vm --zone=us-central1-a`
+2. Add your Groq key: `nano ~/subsgen/.env` → change `REPLACE_WITH_YOUR_KEY` to your key
+3. Build & run: `cd ~/subsgen && sudo docker build -t subsgen-api . && sudo docker run -d --name subsgen --restart unless-stopped -p 7860:7860 --env-file .env subsgen-api`
+4. API: `http://34.121.45.9:7860`
+
+### CI/CD (GitHub Actions → GCP VM)
+
+On push to `main`, `.github/workflows/gcp-deploy.yml` deploys to the VM via SSH.
+
+**Setup:**
+
+1. Generate a deploy key: `ssh-keygen -t ed25519 -C "gcp-deploy" -f deploy_key -N ""`
+2. Add the **public** key to the VM: `gcloud compute ssh subsgen-vm --zone=us-central1-a --command="mkdir -p ~/.ssh && echo '$(cat deploy_key.pub)' >> ~/.ssh/authorized_keys"`
+3. Add GitHub Secrets (repo → Settings → Secrets and variables → Actions):
+   - `GCP_SSH_KEY`: contents of `deploy_key` (private key)
+   - `GCP_SSH_HOST`: `prabh@34.121.45.9` (use your VM username)
+   - `GROQ_API_KEY`: your Groq API key
+4. Delete `deploy_key` and `deploy_key.pub` locally after adding secrets.
