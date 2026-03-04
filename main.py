@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,13 +11,18 @@ from routers import video
 from routers import reel_pipeline
 from utils.ffmpeg_check import check_ffmpeg_available
 
-# ── Logging config: verbose, timestamped ────────────────────────────────────
+# ── Logging config: timestamped, env-controlled level ────────────────────────
+LOG_LEVEL = getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO)
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=LOG_LEVEL,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("subsgen")
+
+# Reduce noise from third-party libs (crewai, httpx, etc.)
+for name in ("httpx", "httpcore", "urllib3", "openai", "langchain", "crewai"):
+    logging.getLogger(name).setLevel(logging.WARNING)
 
 app = FastAPI(
     title="Instagram Subtitles API",
