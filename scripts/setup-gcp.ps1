@@ -48,7 +48,7 @@ if ($LASTEXITCODE -ne 0) { Write-Host "  (service account may already exist)" }
 
 # 5. Grant roles
 Write-Host "[5/6] Granting IAM roles..."
-foreach ($role in @("run.admin", "artifactregistry.writer", "iam.serviceAccountUser", "storage.admin")) {
+foreach ($role in @("run.admin", "artifactregistry.writer", "iam.serviceAccountUser", "storage.admin", "serviceusage.serviceUsageAdmin")) {
     gcloud projects add-iam-policy-binding $PROJECT_ID `
         --member="serviceAccount:$SA_EMAIL" `
         --role="roles/$role" `
