@@ -26,6 +26,7 @@ from agents.flows            import run_reel_flow
 from agents.key_manager      import has_keys, key_count
 from services.subtitle       import generate_ass_subtitles, burn_subtitles, get_video_duration
 from services.video_editor   import produce_reel
+from services.color_grade   import apply_color_grade
 from services.audio_master   import mix_with_ducking
 from services.music_selector import mix_music
 from services.gcs_upload     import upload_and_get_signed_url
@@ -47,6 +48,7 @@ async def pipeline_status():
             "stt":    "whisper-large-v3 (Groq)",
             "vision": "meta-llama/llama-4-scout-17b-16e-instruct (Groq)",
             "brain":  "llama-3.3-70b-versatile (Groq)",
+            "color_grader": "llama-3.3-70b-versatile (Groq)",
             "music":  "llama-3.3-70b-versatile (Groq) + Internet Archive",
             "subtitle_verifier": "llama-3.3-70b-versatile (Groq)",
             "edit":   "FFmpeg",
@@ -102,6 +104,7 @@ async def process_reel_pipeline(
         needs_subtitles  = blueprint.get("needs_subtitles", True)
         subtitle_style   = blueprint["subtitle_style"]
         music_path      = blueprint["music_path"]
+        color_preset    = blueprint.get("color_preset", "neutral")
         all_words       = blueprint["all_words"]
         caption         = blueprint["caption"]
         edit_plan       = blueprint["edit_plan"]
@@ -118,6 +121,12 @@ async def process_reel_pipeline(
         for item in ordered_clips:
             handler.cleanup_file(item[0])
         logger.info(f"[PIPELINE] Step 3 done: Reel produced in {time.time()-t_edit:.1f}s")
+
+        # ── 3b. Color grading ───────────────────────────────────────────
+        graded = handler.create_temp_path(".mp4")
+        apply_color_grade(stitched, graded, preset=color_preset)
+        handler.cleanup_file(stitched)
+        stitched = graded
 
         # ── 4. Mix music (with ducking when speech present) ──────────────
         with_music = handler.create_temp_path(".mp4")

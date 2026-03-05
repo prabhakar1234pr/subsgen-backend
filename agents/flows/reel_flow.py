@@ -15,6 +15,7 @@ from agents.brain import create_edit_plan
 from agents.music_supervisor import find_and_download_music
 from agents.holistic_reviewer import create_holistic_review
 from agents.subtitle_verifier import verify_and_decide
+from agents.color_grader import suggest_color_grade
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,11 @@ def run_reel_flow(clip_paths: list[Path]) -> dict:
     kept = [c for c in edit_plan.get("clips", []) if c.get("keep", True)]
     logger.info(f"  → Keeping {len(kept)}/{n} clips")
 
+    # 4b. Color grading preset
+    logger.info("[4b/7] ColorGrader — pick preset from mood/energy")
+    color_preset = suggest_color_grade(edit_plan)
+    logger.info(f"  → Preset: {color_preset}")
+
     # 5. Music
     logger.info("[5/6] MusicSupervisor — Internet Archive")
     tmp_dir = Path(tempfile.gettempdir())
@@ -72,14 +78,14 @@ def run_reel_flow(clip_paths: list[Path]) -> dict:
     for clip_plan in kept_clips:
         idx = clip_plan["clip_index"]
         clip_path = clip_paths[idx]
+        dur = transcripts[idx].get("duration_sec") or 0.0
         trim_start = clip_plan.get("trim_start_sec")
         trim_end = clip_plan.get("trim_end_sec")
-        trans_out = clip_plan.get("transition_out")
-        trans_dur = clip_plan.get("transition_duration_sec")
+        trans_out = clip_plan.get("transition_out") or "fade"
+        trans_dur = clip_plan.get("transition_duration_sec") or 0.35
         if trim_start is None or trim_end is None:
-            raise ValueError(f"[ReelFlow] Clip {idx} missing trim_start_sec or trim_end_sec from EditDirector")
-        if trans_out is None or trans_dur is None:
-            raise ValueError(f"[ReelFlow] Clip {idx} missing transition_out or transition_duration_sec from EditDirector")
+            logger.warning(f"[ReelFlow] Clip {idx} missing trim — using full clip (0 to {dur:.1f}s)")
+            trim_start, trim_end = 0.0, dur
         ordered_clips.append((clip_path, float(trim_start), float(trim_end), trans_out, float(trans_dur)))
 
     all_words = []
@@ -112,6 +118,7 @@ def run_reel_flow(clip_paths: list[Path]) -> dict:
         "transcripts": transcripts,
         "analyses": analyses,
         "music_path": music_path,
+        "color_preset": color_preset,
         "needs_subtitles": needs_subtitles,
         "subtitle_style": subtitle_style,
         "subtitle_verifier": verifier_result,

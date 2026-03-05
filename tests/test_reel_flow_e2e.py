@@ -27,6 +27,7 @@ class TestReelFlowE2E:
         assert "caption" in blueprint
         assert "all_words" in blueprint
         assert "music_path" in blueprint
+        assert "color_preset" in blueprint
 
         assert "needs_subtitles" in blueprint
         assert len(blueprint["transcripts"]) == 1

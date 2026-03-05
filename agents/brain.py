@@ -171,7 +171,7 @@ def create_edit_plan(
         if "clips" not in plan or not plan["clips"]:
             raise ValueError("[Brain] Agent must return non-empty clips array")
 
-        # Clamp trim times to physical clip bounds only (no creative overrides)
+        # Clamp trim times to physical clip bounds; fallback to full clip if LLM omits
         for clip_plan in plan["clips"]:
             idx = clip_plan.get("clip_index", 0)
             t = next((x for x in transcripts if x["clip_index"] == idx), None)
@@ -180,7 +180,9 @@ def create_edit_plan(
                 trim_start = clip_plan.get("trim_start_sec")
                 trim_end = clip_plan.get("trim_end_sec")
                 if trim_start is None or trim_end is None:
-                    raise ValueError(f"[Brain] Clip {idx} must have trim_start_sec and trim_end_sec")
+                    logger.warning(f"[Brain] Clip {idx} missing trim_start_sec/trim_end_sec — using full clip (0 to {dur:.1f}s)")
+                    trim_start = 0.0
+                    trim_end = dur
                 clip_plan["trim_start_sec"] = max(0.0, min(float(trim_start), dur))
                 clip_plan["trim_end_sec"]   = max(0.0, min(float(trim_end), dur))
         kept = [c for c in plan["clips"] if c.get("keep", True)]

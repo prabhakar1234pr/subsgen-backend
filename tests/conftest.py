@@ -249,6 +249,8 @@ def _create_groq_mock(call_responses: dict):
             content = call_responses.get("chat_video_analyst") or json.dumps(SAMPLE_ANALYSIS)
         elif "overall_impression" in msg_str and "best_clip_for_hook" in msg_str:
             content = call_responses.get("chat_holistic") or json.dumps(SAMPLE_HOLISTIC_REVIEW)
+        elif "color_preset" in msg_str and "colorist" in msg_str:
+            content = call_responses.get("chat_color_grader") or '{"color_preset": "warm", "reason": "fits motivational mood"}'
         else:
             content = call_responses.get("chat_default") or json.dumps(SAMPLE_HOLISTIC_REVIEW)
         return _make_chat_response(content)
@@ -310,6 +312,8 @@ def mock_key_manager():
         patch("agents.music_supervisor.next_key", return_value="test-groq-key-12345"),
         patch("agents.subtitle_verifier.has_keys", return_value=True),
         patch("agents.subtitle_verifier.next_key", return_value="test-groq-key-12345"),
+        patch("agents.color_grader.has_keys", return_value=True),
+        patch("agents.color_grader.next_key", return_value="test-groq-key-12345"),
     ):
         yield
 
@@ -332,6 +336,7 @@ def mock_groq():
         patch("agents.brain.Groq", return_value=client),
         patch("agents.music_supervisor.Groq", return_value=client),
         patch("agents.subtitle_verifier.Groq", return_value=client),
+        patch("agents.color_grader.Groq", return_value=client),
     ):
         yield client
 
