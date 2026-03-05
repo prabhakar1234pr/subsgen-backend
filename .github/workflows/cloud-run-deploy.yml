@@ -36,7 +36,7 @@ jobs:
 
       - name: Create GCS bucket (if not exists)
         run: |
-          gcloud services enable storage.googleapis.com --quiet
+          gcloud services enable storage.googleapis.com cloudresourcemanager.googleapis.com --quiet
           BUCKET="${{ env.GCS_BUCKET }}"
           gcloud storage buckets describe "gs://$BUCKET" 2>/dev/null || {
             gcloud storage buckets create "gs://$BUCKET" --location=${{ env.GCP_REGION }}
