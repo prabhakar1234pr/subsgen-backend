@@ -57,15 +57,7 @@ def create_holistic_review(
     Produce human-like holistic review of all clips for EditDirector.
     """
     if not has_keys():
-        logger.info("[HolisticReviewer] No keys — using stub")
-        return {
-            "overall_impression": "",
-            "best_clip_for_hook": 0,
-            "best_clip_for_cta": max(0, len(transcripts) - 1) if transcripts else 0,
-            "clips_to_cut": [],
-            "pacing_suggestion": "normal",
-            "creative_notes": "No holistic review available.",
-        }
+        raise RuntimeError("[HolisticReviewer] No Groq API keys — requires LLM to produce holistic review")
 
     n = len(transcripts)
     if n == 0:
@@ -97,24 +89,14 @@ def create_holistic_review(
         raw = raw.replace("```json", "").replace("```", "").strip()
         review = json.loads(raw)
 
-        # Validate indices
+        # Clamp indices to valid range only (safety, not creative override)
         review["best_clip_for_hook"] = max(0, min(int(review.get("best_clip_for_hook", 0)), n - 1))
         review["best_clip_for_cta"] = max(0, min(int(review.get("best_clip_for_cta", n - 1)), n - 1))
         review["clips_to_cut"] = [c for c in review.get("clips_to_cut", []) if 0 <= c < n]
-        review.setdefault("overall_impression", "")
-        review.setdefault("pacing_suggestion", "normal")
-        review.setdefault("creative_notes", "")
 
-        logger.info(f"[HolisticReviewer] impression={review['overall_impression'][:60]}...")
+        logger.info(f"[HolisticReviewer] impression={review.get('overall_impression', '')[:60]}...")
         return review
 
     except (json.JSONDecodeError, Exception) as e:
-        logger.warning(f"[HolisticReviewer] Failed: {e} — using stub")
-        return {
-            "overall_impression": "",
-            "best_clip_for_hook": 0,
-            "best_clip_for_cta": max(0, n - 1),
-            "clips_to_cut": [],
-            "pacing_suggestion": "normal",
-            "creative_notes": "Holistic review unavailable.",
-        }
+        logger.error(f"[HolisticReviewer] Failed: {e}")
+        raise

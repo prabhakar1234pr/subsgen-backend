@@ -17,6 +17,7 @@ from agents.video_analyst import analyze_clip
 from agents.brain import create_edit_plan
 from agents.music_supervisor import find_and_download_music
 from agents.holistic_reviewer import create_holistic_review
+from agents.subtitle_verifier import verify_and_decide
 
 from agents.flows.state import ReelFlowState
 
@@ -84,7 +85,7 @@ class ReelFlow(Flow[ReelFlowState]):
         self.state.edit_plan = edit_plan
         kept = [c for c in edit_plan.get("clips", []) if c.get("keep", True)]
         logger.info(f"  → Keeping {len(kept)}/{len(self.state.clip_paths)} clips")
-        logger.info(f"  → Style: {edit_plan.get('subtitle_style')}")
+        logger.info(f"  → Clips: {len(kept)} kept")
         return self.state
 
     @listen(edit_director)
@@ -113,11 +114,15 @@ class ReelFlow(Flow[ReelFlowState]):
             idx = clip_plan["clip_index"]
             clip_path = clip_paths[idx]
             default_dur = transcripts[idx].get("duration_sec") or 0.0
-            trim_start = float(clip_plan.get("trim_start_sec") or 0.0)
-            trim_end = float(clip_plan.get("trim_end_sec") or default_dur)
-            trans_out = clip_plan.get("transition_out") or "fade"
-            trans_dur = float(clip_plan.get("transition_duration_sec") or 0.35)
-            ordered_clips.append((clip_path, trim_start, trim_end, trans_out, trans_dur))
+            trim_start = clip_plan.get("trim_start_sec")
+            trim_end = clip_plan.get("trim_end_sec")
+            trans_out = clip_plan.get("transition_out")
+            trans_dur = clip_plan.get("transition_duration_sec")
+            if trim_start is None or trim_end is None:
+                raise ValueError(f"[ReelFlow] Clip {idx} missing trim_start_sec or trim_end_sec from EditDirector")
+            if trans_out is None or trans_dur is None:
+                raise ValueError(f"[ReelFlow] Clip {idx} missing transition_out or transition_duration_sec from EditDirector")
+            ordered_clips.append((clip_path, float(trim_start), float(trim_end), trans_out, float(trans_dur)))
 
         all_words = []
         time_cursor = 0.0
@@ -137,7 +142,11 @@ class ReelFlow(Flow[ReelFlowState]):
             clip_duration = trim_end - trim_start
             time_cursor += clip_duration
 
-        logger.info(f"╚══ ReelFlow complete — {len(all_words)} subtitle words, {len(ordered_clips)} clips ══╝")
+        logger.info(f"[6/6] SubtitleVerifier — verify transcription, decide if subs needed")
+        verifier_result = verify_and_decide(all_words, edit_plan, transcripts)
+        needs_subtitles = verifier_result["needs_subtitles"]
+        subtitle_style = verifier_result["subtitle_style"]
+        logger.info(f"╚══ ReelFlow complete — {len(all_words)} words, {len(ordered_clips)} clips | subs={needs_subtitles} style={subtitle_style} ══╝")
 
         return {
             "ordered_clips": ordered_clips,
@@ -145,7 +154,9 @@ class ReelFlow(Flow[ReelFlowState]):
             "transcripts": transcripts,
             "analyses": self.state.analyses,
             "music_path": music_path,
-            "subtitle_style": edit_plan.get("subtitle_style", "hormozi"),
+            "needs_subtitles": needs_subtitles,
+            "subtitle_style": subtitle_style,
+            "subtitle_verifier": verifier_result,
             "caption": edit_plan.get("caption", {}),
             "all_words": all_words,
         }

@@ -48,6 +48,7 @@ async def pipeline_status():
             "vision": "meta-llama/llama-4-scout-17b-16e-instruct (Groq)",
             "brain":  "llama-3.3-70b-versatile (Groq)",
             "music":  "llama-3.3-70b-versatile (Groq) + Internet Archive",
+            "subtitle_verifier": "llama-3.3-70b-versatile (Groq)",
             "edit":   "FFmpeg",
         }
     }
@@ -97,12 +98,13 @@ async def process_reel_pipeline(
         blueprint = await asyncio.to_thread(run_reel_flow, clip_paths)
         logger.info(f"[PIPELINE] Step 2 done: AI pipeline in {time.time()-t_ai:.1f}s | clips={len(blueprint.get('ordered_clips', []))} | words={len(blueprint.get('all_words', []))}")
 
-        ordered_clips  = blueprint["ordered_clips"]
-        subtitle_style = blueprint["subtitle_style"]
-        music_path     = blueprint["music_path"]
-        all_words      = blueprint["all_words"]
-        caption        = blueprint["caption"]
-        edit_plan      = blueprint["edit_plan"]
+        ordered_clips    = blueprint["ordered_clips"]
+        needs_subtitles  = blueprint.get("needs_subtitles", True)
+        subtitle_style   = blueprint["subtitle_style"]
+        music_path      = blueprint["music_path"]
+        all_words       = blueprint["all_words"]
+        caption         = blueprint["caption"]
+        edit_plan       = blueprint["edit_plan"]
 
         if not ordered_clips:
             logger.error("[PIPELINE] Brain cut all clips — no content to produce")
@@ -121,24 +123,30 @@ async def process_reel_pipeline(
         with_music = handler.create_temp_path(".mp4")
         if music_path and music_path.exists():
             logger.info("[PIPELINE] Mixing music with ducking...")
+            for k in ("music_volume", "duck_strength", "music_fade_in_sec", "music_fade_out_sec"):
+                if k not in edit_plan:
+                    raise ValueError(f"[PIPELINE] EditDirector must provide {k}")
             mix_with_ducking(
                 stitched, music_path, all_words, with_music,
-                music_volume=float(edit_plan.get("music_volume", 0.12)),
-                duck_strength=edit_plan.get("duck_strength", "medium"),
-                fade_in=float(edit_plan.get("music_fade_in_sec", 1.0)),
-                fade_out=float(edit_plan.get("music_fade_out_sec", 2.0)),
+                music_volume=float(edit_plan["music_volume"]),
+                duck_strength=edit_plan["duck_strength"],
+                fade_in=float(edit_plan["music_fade_in_sec"]),
+                fade_out=float(edit_plan["music_fade_out_sec"]),
             )
             music_path.unlink(missing_ok=True)
         else:
-            logger.info(f"[PIPELINE] No downloaded music — using bundled fallback (mood={edit_plan.get('music_mood','motivational')})")
-            mix_music(stitched, with_music, mood=edit_plan.get("music_mood", "motivational"))
+            mood = edit_plan.get("music_mood")
+            if not mood:
+                raise ValueError("[PIPELINE] EditDirector must provide music_mood (used when no CC0 music found)")
+            logger.info(f"[PIPELINE] No downloaded music — using bundled fallback (mood={mood})")
+            mix_music(stitched, with_music, mood=mood)
         handler.cleanup_file(stitched)
 
-        # ── 5. Burn subtitles (using Brain's pre-computed word list) ───
+        # ── 5. Burn subtitles (SubtitleVerifier decided if needed + which style) ───
         t_subs = time.time()
-        logger.info(f"[PIPELINE] Step 5: Burning subtitles | words={len(all_words)} | style={subtitle_style}")
-        if not all_words:
-            logger.warning("[PIPELINE] No words from Brain — subtitles skipped")
+        logger.info(f"[PIPELINE] Step 5: Subtitles | needs={needs_subtitles} | words={len(all_words)} | style={subtitle_style}")
+        if not needs_subtitles or not all_words:
+            logger.info("[PIPELINE] SubtitleVerifier: no subtitles needed — skipping burn")
             final = with_music
         else:
             logger.info(f"[PIPELINE] Burning {len(all_words)} subtitle words (style={subtitle_style})...")

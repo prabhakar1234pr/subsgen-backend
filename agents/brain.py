@@ -15,13 +15,15 @@ import json
 import logging
 from groq import Groq
 from agents.key_manager import next_key, has_keys
-from agents.schemas import ensure_clip_edit_fields, ensure_edit_plan_fields
 
 logger = logging.getLogger(__name__)
 LLM_MODEL = "llama-3.3-70b-versatile"
 
+# FFmpeg xfade transition types — agent has full freedom to choose any
+FFMPEG_TRANSITIONS = "fade, wipeleft, wiperight, wipeup, wipedown, slideleft, slideright, slideup, slidedown, rectcrop, distance, fadeblack, fadewhite"
+
 BRAIN_PROMPT = """You are an elite Instagram Reels director. Be CREATIVE. Surprise the viewer.
-Don't always put the obvious hook first. Consider unconventional order. Pick transitions that match the energy of each cut.
+You have COMPLETE FREEDOM. Make every decision yourself. No defaults — you must specify everything.
 
 You have {n_clips} raw video clip(s) to turn into ONE viral Instagram Reel.
 {holistic_context}
@@ -31,23 +33,24 @@ CLIP DATA:
 {clip_data_json}
 ═══════════════════════════════════════
 
-Your job: produce a complete, creative EditPlan.
+Your job: produce a complete, creative EditPlan. You MUST provide every field — no omissions.
 
 SCORING: keep_score 1-10. Below 4 = cut. Prefer strong hooks, clear speech, good lighting.
 
 NARRATIVE: Hook first, value middle, CTA end. Trim filler ("um", "so") — give exact start_sec/end_sec.
 
-TRANSITIONS (per kept clip): Pick what fits the energy.
-- transition_in: "fade" | "wipe_left" | "wipe_right" | "slide_left" | "slide_right" | "none"
-- transition_out: same options (used when cutting TO the next clip)
-- transition_duration_sec: 0.2 to 0.8
+TRANSITIONS (per kept clip): Pick what fits the energy. Use FFmpeg xfade types directly:
+- transition_in, transition_out: any of [{ffmpeg_transitions}]
+- transition_duration_sec: 0.2 to 0.8 (your choice)
 - pacing_note: "quick_cut" | "hold" | "normal"
 
-CREATIVE: creative_direction = "bold cuts" | "smooth flow" | "punchy" | "cinematic"
+CREATIVE: creative_direction, music_volume, duck_strength, music_fade_in_sec, music_fade_out_sec — all your choice.
 
-MUSIC: music_volume 0.05-0.2, duck_strength "light"|"medium"|"heavy", music_creative_brief for unusual/contrasting choices.
+MUSIC: music_search_query, music_mood, music_bpm_preference, music_creative_brief — you decide.
 
-Respond ONLY with valid JSON. No markdown.
+NOTE: Subtitle style is decided later by SubtitleVerifier — do NOT include subtitle_style.
+
+Respond ONLY with valid JSON. No markdown. Every field is required (except subtitle_style).
 
 {{
   "clips": [
@@ -67,15 +70,13 @@ Respond ONLY with valid JSON. No markdown.
       "pacing_note": "normal"
     }}
   ],
-  "subtitle_style": "hormozi | minimal | neon | fire | karaoke | purple",
-  "subtitle_style_reason": "one sentence",
   "overall_mood": "motivational | educational | entertaining | emotional | inspirational",
   "overall_energy": "low | medium | high",
   "music_search_query": "2-4 word search query",
   "music_mood": "motivational | chill | energy | uplifting | cinematic",
   "music_bpm_preference": "slow | medium | fast",
   "creative_direction": "bold cuts | smooth flow | punchy | cinematic",
-  "music_volume": 0.12,
+  "music_volume": 0.05-0.2,
   "duck_strength": "light | medium | heavy",
   "music_fade_in_sec": 1.0,
   "music_fade_out_sec": 2.0,
@@ -127,8 +128,7 @@ def create_edit_plan(
     EditDirector: synthesize holistic review + transcripts + analyses into creative EditPlan.
     """
     if not has_keys():
-        logger.warning("[Brain] No Groq keys — using fallback edit plan")
-        return _fallback_plan(transcripts, analyses)
+        raise RuntimeError("[Brain] No Groq API keys — EditDirector requires LLM to make edit decisions")
 
     clip_data = _build_clip_data(transcripts, analyses)
     holistic_context = ""
@@ -141,6 +141,7 @@ def create_edit_plan(
         n_clips=len(clip_data),
         holistic_context=holistic_context,
         clip_data_json=json.dumps(clip_data, indent=2),
+        ffmpeg_transitions=FFMPEG_TRANSITIONS,
     )
 
     try:
@@ -166,28 +167,22 @@ def create_edit_plan(
         raw = raw.replace("```json", "").replace("```", "").strip()
         plan = json.loads(raw)
 
-        # Validate + fix clips list
         n = len(transcripts)
         if "clips" not in plan or not plan["clips"]:
-            plan["clips"] = _default_clips(transcripts)
+            raise ValueError("[Brain] Agent must return non-empty clips array")
 
-        # Ensure all clips are present, clamp times, add transition fields
+        # Clamp trim times to physical clip bounds only (no creative overrides)
         for clip_plan in plan["clips"]:
-            ensure_clip_edit_fields(clip_plan)
             idx = clip_plan.get("clip_index", 0)
             t = next((x for x in transcripts if x["clip_index"] == idx), None)
             if t:
                 dur = t.get("duration_sec") or 0.0
-                trim_start = clip_plan.get("trim_start_sec") or 0
-                trim_end = clip_plan.get("trim_end_sec") or dur
-                clip_plan["trim_start_sec"] = max(0.0, float(trim_start))
-                clip_plan["trim_end_sec"]   = min(dur, float(trim_end))
-                # Ensure at least 2 seconds
-                if clip_plan["trim_end_sec"] - clip_plan["trim_start_sec"] < 2.0:
-                    clip_plan["trim_start_sec"] = 0.0
-                    clip_plan["trim_end_sec"]   = dur
-
-        ensure_edit_plan_fields(plan)
+                trim_start = clip_plan.get("trim_start_sec")
+                trim_end = clip_plan.get("trim_end_sec")
+                if trim_start is None or trim_end is None:
+                    raise ValueError(f"[Brain] Clip {idx} must have trim_start_sec and trim_end_sec")
+                clip_plan["trim_start_sec"] = max(0.0, min(float(trim_start), dur))
+                clip_plan["trim_end_sec"]   = max(0.0, min(float(trim_end), dur))
         kept = [c for c in plan["clips"] if c.get("keep", True)]
         logger.info(
             f"[Brain] Plan: {len(kept)}/{n} clips kept, "
@@ -199,50 +194,7 @@ def create_edit_plan(
 
     except json.JSONDecodeError as e:
         logger.error(f"[Brain] Invalid JSON response: {e}")
-        return _fallback_plan(transcripts, analyses)
+        raise
     except Exception as e:
         logger.error(f"[Brain] Error: {e}")
-        return _fallback_plan(transcripts, analyses)
-
-
-def _default_clips(transcripts: list[dict]) -> list[dict]:
-    clips = []
-    for i, t in enumerate(transcripts):
-        c = {
-            "clip_index":      t.get("clip_index", i),
-            "keep":            True,
-            "keep_score":      6,
-            "keep_reason":     "default — no AI scoring available",
-            "narrative_role":  "value",
-            "narrative_order": i,
-            "trim_start_sec":  (t["words"][0].get("start") or 0.0) if t.get("words") else 0.0,
-            "trim_end_sec":    t.get("duration_sec") or 0.0,
-            "trim_reason":     "no LLM trimming available",
-        }
-        ensure_clip_edit_fields(c)
-        clips.append(c)
-    return clips
-
-
-def _fallback_plan(transcripts: list[dict], analyses: list[dict]) -> dict:
-    styles = [a.get("recommended_subtitle_style", "hormozi") for a in analyses]
-    style  = max(set(styles), key=styles.count) if styles else "hormozi"
-    plan = {
-        "clips":                  _default_clips(transcripts),
-        "subtitle_style":         style,
-        "subtitle_style_reason":  "Most common style across clips",
-        "overall_mood":           "motivational",
-        "overall_energy":         "medium",
-        "music_search_query":     "motivational background",
-        "music_mood":             "motivational",
-        "music_bpm_preference":   "medium",
-        "caption": {
-            "hook":      "You need to see this.",
-            "body":      "Watch till the end.\nThis changes everything.",
-            "cta":       "Follow for more.",
-            "hashtags":  ["#reels", "#viral", "#content", "#creator", "#trending"]
-        },
-        "director_notes":              "Sequential edit, no AI director available.",
-        "estimated_reel_duration_sec": 30,
-    }
-    return ensure_edit_plan_fields(plan)
+        raise

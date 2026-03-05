@@ -87,8 +87,7 @@ def transcribe_clip(video_path: Path, clip_index: int = 0) -> dict:
         duration = float(result.stdout.strip())
 
         if not has_keys():
-            logger.warning("No Groq keys — returning empty transcript")
-            return _empty_transcript(clip_index, video_path.name, duration)
+            raise RuntimeError("[Transcriber] No Groq API keys — requires Whisper to transcribe")
 
         # Extract + compress audio
         logger.info(f"[Transcriber] Clip {clip_index+1}: Extracting audio from {video_path.name} | duration={duration:.1f}s")
@@ -160,31 +159,10 @@ def transcribe_clip(video_path: Path, clip_index: int = 0) -> dict:
 
     except Exception as e:
         logger.error(f"[Transcriber] Clip {clip_index+1} failed: {e}")
-        duration = 0.0
-        try:
-            r = subprocess.run(
-                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-                 "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)],
-                capture_output=True, text=True)
-            duration = float(r.stdout.strip())
-        except Exception:
-            pass
-        return _empty_transcript(clip_index, video_path.name, duration)
+        raise
 
     finally:
         if audio_path and audio_path.exists():
             audio_path.unlink(missing_ok=True)
 
 
-def _empty_transcript(clip_index: int, clip_name: str, duration: float) -> dict:
-    return {
-        "clip_index":   clip_index,
-        "clip_name":    clip_name,
-        "full_text":    "",
-        "duration_sec": duration,
-        "words":        [],
-        "segments":     [],
-        "language":     "en",
-        "speech_ratio": 0.0,
-        "has_speech":   False,
-    }

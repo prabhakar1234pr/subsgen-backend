@@ -40,19 +40,6 @@ SAFE_LICENSE_KEYWORDS = ["publicdomain", "zero/1.0", "cc0"]
 # Browser-like User-Agent — archive.org returns 401 for requests without it
 IA_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
 
-# Mood → search keywords that work well on Internet Archive
-MOOD_KEYWORDS = {
-    "motivational":  "motivational background instrumental",
-    "chill":         "chill lofi relaxing instrumental",
-    "energy":        "upbeat energetic hype instrumental",
-    "uplifting":     "uplifting happy positive instrumental",
-    "cinematic":     "cinematic dramatic epic instrumental",
-    "educational":   "calm background study instrumental",
-    "entertaining":  "fun playful background instrumental",
-    "emotional":     "emotional moving touching instrumental",
-}
-
-
 # ─────────────────────────────────────────────────────────────────────
 # Step 1 — LLM refines the search query
 # ─────────────────────────────────────────────────────────────────────
@@ -80,43 +67,38 @@ Respond ONLY with JSON — no markdown:
 
 def _refine_query(edit_plan: dict) -> str:
     """Use LLM to produce the best Internet Archive search query."""
-    fallback_mood = edit_plan.get("overall_mood", "motivational")
-    fallback = MOOD_KEYWORDS.get(fallback_mood, "background instrumental music")
-
     if not has_keys():
-        return fallback
+        raise RuntimeError("[MusicSupervisor] No Groq API keys — requires LLM to refine music search")
 
     caption = edit_plan.get("caption", {})
     clips   = edit_plan.get("clips", [{}])
     prompt  = REFINE_PROMPT.format(
-        music_search_query   = edit_plan.get("music_search_query", fallback),
-        overall_mood         = edit_plan.get("overall_mood", "motivational"),
-        overall_energy       = edit_plan.get("overall_energy", "medium"),
-        content_type         = clips[0].get("content_type", "talking_head") if clips else "talking_head",
-        caption_hook         = caption.get("hook", ""),
-        music_creative_brief = edit_plan.get("music_creative_brief", ""),
+        music_search_query   = edit_plan.get("music_search_query", ""),
+        overall_mood         = edit_plan.get("overall_mood", ""),
+        overall_energy        = edit_plan.get("overall_energy", ""),
+        content_type          = clips[0].get("content_type", "") if clips else "",
+        caption_hook          = caption.get("hook", ""),
+        music_creative_brief  = edit_plan.get("music_creative_brief", ""),
     )
 
-    try:
-        client   = Groq(api_key=next_key())
-        response = client.chat.completions.create(
-            model    = LLM_MODEL,
-            messages = [
-                {"role": "system", "content": "Respond with JSON only."},
-                {"role": "user",   "content": prompt},
-            ],
-            max_tokens  = 100,
-            temperature = 0.2,
-        )
-        raw    = response.choices[0].message.content.strip()
-        raw    = raw.replace("```json", "").replace("```", "").strip()
-        result = json.loads(raw)
-        query  = result.get("search_query", fallback)
-        logger.info(f"[MusicSupervisor] Refined query: '{query}' — {result.get('reason', '')}")
-        return query
-    except Exception as e:
-        logger.warning(f"[MusicSupervisor] Query refinement failed: {e} — using fallback '{fallback}'")
-        return fallback
+    client   = Groq(api_key=next_key())
+    response = client.chat.completions.create(
+        model    = LLM_MODEL,
+        messages = [
+            {"role": "system", "content": "Respond with JSON only."},
+            {"role": "user",   "content": prompt},
+        ],
+        max_tokens  = 100,
+        temperature = 0.2,
+    )
+    raw    = response.choices[0].message.content.strip()
+    raw    = raw.replace("```json", "").replace("```", "").strip()
+    result = json.loads(raw)
+    query  = result.get("search_query")
+    if not query:
+        raise ValueError("[MusicSupervisor] LLM must return search_query in refinement response")
+    logger.info(f"[MusicSupervisor] Refined query: '{query}' — {result.get('reason', '')}")
+    return query
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -218,8 +200,10 @@ def _pick_best_item(items: list[dict], edit_plan: dict) -> dict | None:
     """Use LLM to pick the best matching item from search results."""
     if not items:
         return None
-    if len(items) == 1 or not has_keys():
+    if len(items) == 1:
         return items[0]
+    if not has_keys():
+        raise RuntimeError("[MusicSupervisor] No Groq API keys — requires LLM to pick music track")
 
     summaries = [
         {
@@ -252,15 +236,19 @@ def _pick_best_item(items: list[dict], edit_plan: dict) -> dict | None:
         raw    = response.choices[0].message.content.strip()
         raw    = raw.replace("```json", "").replace("```", "").strip()
         result = json.loads(raw)
-        idx    = max(0, min(int(result.get("chosen_index", 0)), len(items) - 1))
+        idx = result.get("chosen_index")
+        if idx is None:
+            raise ValueError("[MusicSupervisor] LLM must return chosen_index in response")
+        idx = max(0, min(int(idx), len(items) - 1))
         logger.info(
             f"[MusicSupervisor] LLM picked item #{idx}: "
             f"'{items[idx].get('title')}' — {result.get('reason', '')}"
         )
         return items[idx]
+    except (KeyError, TypeError, ValueError) as e:
+        raise
     except Exception as e:
-        logger.warning(f"[MusicSupervisor] Item picking failed: {e} — using first result")
-        return items[0]
+        raise RuntimeError(f"[MusicSupervisor] Item picking failed: {e}") from e
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -308,18 +296,6 @@ def find_and_download_music(edit_plan: dict, output_dir: Path) -> Path | None:
 
     # Step 2 — search
     items = _search_internet_archive(query)
-
-    # Fallback: try mood-based keyword if no results
-    if not items:
-        fallback_mood    = edit_plan.get("overall_mood", "motivational")
-        fallback_query   = MOOD_KEYWORDS.get(fallback_mood, "background instrumental")
-        logger.info(f"[MusicSupervisor] No results — retrying with fallback: '{fallback_query}'")
-        items = _search_internet_archive(fallback_query)
-
-    # Last resort: generic query
-    if not items:
-        logger.info("[MusicSupervisor] Still no results — trying generic query")
-        items = _search_internet_archive("royalty free background music instrumental")
 
     if not items:
         logger.warning("[MusicSupervisor] No CC0 music found — reel will have no background music")

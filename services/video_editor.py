@@ -12,15 +12,12 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Agent transition names -> FFmpeg xfade transition
-XFADE_MAP = {
-    "fade": "fade",
-    "wipe_left": "wipeleft",
-    "wipe_right": "wiperight",
-    "slide_left": "slideleft",
-    "slide_right": "slideright",
-    "none": "fade",  # fallback
-}
+# FFmpeg xfade transition types — agent chooses directly, no mapping
+VALID_XFADE = frozenset([
+    "fade", "wipeleft", "wiperight", "wipeup", "wipedown",
+    "slideleft", "slideright", "slideup", "slidedown",
+    "rectcrop", "distance", "fadeblack", "fadewhite",
+])
 
 
 def _tmp(ext=".mp4") -> Path:
@@ -47,12 +44,6 @@ def precise_trim(video_path: Path, output_path: Path,
                  start_sec: float, end_sec: float) -> Path:
     """Trim clip to exact Brain-specified start/end times."""
     duration = end_sec - start_sec
-    if duration < 0.5:
-        logger.warning(f"Trim duration {duration:.2f}s too short — copying full clip")
-        subprocess.run(["ffmpeg", "-i", str(video_path), "-c", "copy",
-                        "-y", str(output_path)], check=True, capture_output=True)
-        return output_path
-
     logger.info(f"[VIDEO_EDIT] precise_trim: {video_path.name} | {start_sec:.2f}s → {end_sec:.2f}s | duration={duration:.2f}s")
     subprocess.run([
         "ffmpeg",
@@ -179,8 +170,9 @@ def concat_with_agent_transitions(
         return output_path
 
     # Use first transition for all (or blend); FFmpeg xfade uses same type per segment
-    # For simplicity: use transition from clip 0->1 for first cut, etc.
-    xfade_type = XFADE_MAP.get(transitions[0][0].lower().replace(" ", "_"), "fade")
+    xfade_type = transitions[0][0].lower().replace(" ", "_").replace("-", "")
+    if xfade_type not in VALID_XFADE:
+        raise ValueError(f"[VideoEditor] Invalid transition '{transitions[0][0]}' — must be one of: {sorted(VALID_XFADE)}")
     xfade_sec = transitions[0][1]
     return concat_with_crossfade(clip_paths, output_path, xfade_sec=xfade_sec, xfade_type=xfade_type)
 
@@ -200,8 +192,9 @@ def produce_reel(
         for i, item in enumerate(ordered_clips):
             clip_path = item[0]
             trim_start, trim_end = item[1], item[2]
-            trans_out = item[3] if len(item) >= 5 else "fade"
-            trans_dur = float(item[4]) if len(item) >= 5 else xfade_sec
+            if len(item) < 5:
+                raise ValueError(f"[VideoEditor] Clip {i} must have (path, trim_start, trim_end, transition_out, transition_duration_sec)")
+            trans_out, trans_dur = item[3], float(item[4])
             transitions.append((trans_out, trans_dur))
 
             logger.info(f"[VIDEO_EDIT] Clip {i+1}/{len(ordered_clips)}: {clip_path.name} | trim [{trim_start:.2f}s→{trim_end:.2f}s] | trans={trans_out}")

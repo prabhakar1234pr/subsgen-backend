@@ -82,11 +82,11 @@ def analyze_clip(video_path: Path, transcript: dict, clip_index: int = 0) -> dic
     Now accepts transcript dict from Transcriber agent for richer context.
     """
     if not has_keys():
-        return _default_analysis(clip_index, video_path.name)
+        raise RuntimeError("[VideoAnalyst] No Groq API keys — requires VLM to analyze clips")
 
     frames = _extract_frames(video_path, n_frames=3)
     if not frames:
-        return _default_analysis(clip_index, video_path.name)
+        raise RuntimeError(f"[VideoAnalyst] Could not extract frames from {video_path.name}")
 
     # Give VLM a short transcript preview for context
     transcript_preview = transcript.get("full_text", "")[:200] or "no speech detected"
@@ -123,20 +123,4 @@ def analyze_clip(video_path: Path, transcript: dict, clip_index: int = 0) -> dic
         return analysis
     except Exception as e:
         logger.error(f"[VLM] Clip {clip_index+1} failed: {e}")
-        return _default_analysis(clip_index, video_path.name)
-
-
-def _default_analysis(clip_index: int, clip_name: str = "") -> dict:
-    return {
-        "clip_index": clip_index, "clip_name": clip_name,
-        "content_type": "talking_head",
-        "subject_description": "person speaking to camera",
-        "setting": "indoor_plain",
-        "speaker_energy": "medium", "speaker_confidence": "medium",
-        "lighting_quality": "decent", "framing": "medium",
-        "visual_quality": "decent",
-        "dominant_colors": ["neutral"],
-        "recommended_subtitle_style": "hormozi",
-        "subtitle_style_reason": "Default high-contrast style",
-        "visual_hook_strength": 5, "overall_visual_score": 5,
-    }
+        raise
