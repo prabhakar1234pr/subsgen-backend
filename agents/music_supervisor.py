@@ -37,6 +37,9 @@ IA_DOWNLOAD_URL = "https://archive.org/download/{identifier}/{filename}"
 # Only these licenses are safe to burn into a video (no attribution needed)
 SAFE_LICENSE_KEYWORDS = ["publicdomain", "zero/1.0", "cc0"]
 
+# Browser-like User-Agent — archive.org returns 401 for requests without it
+IA_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+
 # Mood → search keywords that work well on Internet Archive
 MOOD_KEYWORDS = {
     "motivational":  "motivational background instrumental",
@@ -148,7 +151,7 @@ def _search_internet_archive(query: str, max_results: int = 20) -> list[dict]:
     try:
         logger.info(f"[MusicSupervisor] Searching Internet Archive: '{query}'")
         with httpx.Client(timeout=15.0) as client:
-            response = client.get(IA_SEARCH_URL, params=params)
+            response = client.get(IA_SEARCH_URL, params=params, headers=IA_HEADERS)
             response.raise_for_status()
             data  = response.json()
             items = data.get("response", {}).get("docs", [])
@@ -171,7 +174,7 @@ def _get_mp3_files(identifier: str) -> list[dict]:
     url = IA_DETAILS_URL.format(identifier=identifier)
     try:
         with httpx.Client(timeout=10.0) as client:
-            response = client.get(url)
+            response = client.get(url, headers=IA_HEADERS)
             response.raise_for_status()
             metadata = response.json()
 
@@ -270,7 +273,7 @@ def _download_mp3(mp3: dict, output_dir: Path) -> Path | None:
     try:
         logger.info(f"[MusicSupervisor] Downloading: {mp3['url']}")
         with httpx.Client(timeout=60.0, follow_redirects=True) as client:
-            response = client.get(mp3["url"])
+            response = client.get(mp3["url"], headers=IA_HEADERS)
             response.raise_for_status()
             out.write_bytes(response.content)
         size_kb = out.stat().st_size / 1024
