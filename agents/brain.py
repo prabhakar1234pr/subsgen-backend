@@ -103,8 +103,8 @@ def _build_clip_data(transcripts: list[dict], analyses: list[dict]) -> list[dict
             "first_words":      " ".join(w["word"] for w in t["words"][:15]) if t["words"] else "",
             "last_words":       " ".join(w["word"] for w in t["words"][-10:]) if t["words"] else "",
             "word_count":       len(t["words"]),
-            "first_speech_at":  t["words"][0]["start"] if t["words"] else 0,
-            "last_speech_at":   t["words"][-1]["end"] if t["words"] else t["duration_sec"],
+            "first_speech_at":  (t["words"][0].get("start") or 0) if t["words"] else 0,
+            "last_speech_at":   (t["words"][-1].get("end") or t["duration_sec"]) if t["words"] else t["duration_sec"],
             # Visual data
             "visual_quality":   a.get("visual_quality", "unknown"),
             "visual_score":     a.get("overall_visual_score", 5),
@@ -177,9 +177,11 @@ def create_edit_plan(
             idx = clip_plan.get("clip_index", 0)
             t = next((x for x in transcripts if x["clip_index"] == idx), None)
             if t:
-                dur = t["duration_sec"]
-                clip_plan["trim_start_sec"] = max(0.0, float(clip_plan.get("trim_start_sec", 0)))
-                clip_plan["trim_end_sec"]   = min(dur, float(clip_plan.get("trim_end_sec", dur)))
+                dur = t.get("duration_sec") or 0.0
+                trim_start = clip_plan.get("trim_start_sec") or 0
+                trim_end = clip_plan.get("trim_end_sec") or dur
+                clip_plan["trim_start_sec"] = max(0.0, float(trim_start))
+                clip_plan["trim_end_sec"]   = min(dur, float(trim_end))
                 # Ensure at least 2 seconds
                 if clip_plan["trim_end_sec"] - clip_plan["trim_start_sec"] < 2.0:
                     clip_plan["trim_start_sec"] = 0.0
@@ -213,8 +215,8 @@ def _default_clips(transcripts: list[dict]) -> list[dict]:
             "keep_reason":     "default — no AI scoring available",
             "narrative_role":  "value",
             "narrative_order": i,
-            "trim_start_sec":  t["words"][0]["start"] if t.get("words") else 0.0,
-            "trim_end_sec":    t["duration_sec"],
+            "trim_start_sec":  (t["words"][0].get("start") or 0.0) if t.get("words") else 0.0,
+            "trim_end_sec":    t.get("duration_sec") or 0.0,
             "trim_reason":     "no LLM trimming available",
         }
         ensure_clip_edit_fields(c)

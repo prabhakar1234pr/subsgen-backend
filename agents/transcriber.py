@@ -114,19 +114,25 @@ def transcribe_clip(video_path: Path, clip_index: int = 0) -> dict:
         words = []
         if hasattr(response, "words") and response.words:
             for w in response.words:
+                word = w.get("word", getattr(w, "word", ""))
+                start = w.get("start", getattr(w, "start", 0))
+                end = w.get("end", getattr(w, "end", 0))
                 words.append({
-                    "word":  w.word.strip(),
-                    "start": round(float(w.start), 3),
-                    "end":   round(float(w.end), 3),
+                    "word":  str(word).strip(),
+                    "start": round(float(start), 3),
+                    "end":   round(float(end), 3),
                 })
 
         segments = []
         if hasattr(response, "segments") and response.segments:
             for s in response.segments:
+                text = s.get("text", getattr(s, "text", ""))
+                start = s.get("start", getattr(s, "start", 0))
+                end = s.get("end", getattr(s, "end", 0))
                 segments.append({
-                    "text":  s.text.strip(),
-                    "start": round(float(s.start), 3),
-                    "end":   round(float(s.end), 3),
+                    "text":  str(text).strip(),
+                    "start": round(float(start), 3),
+                    "end":   round(float(end), 3),
                 })
 
         # Calculate speech ratio

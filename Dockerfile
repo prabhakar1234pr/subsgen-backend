@@ -20,9 +20,8 @@ ENV PATH="/home/user/app/.venv/bin:$PATH"
 
 RUN uv pip install --python /home/user/app/.venv/bin/python \
     fastapi "uvicorn[standard]" python-multipart \
-    ffmpeg-python numpy \
-    groq httpx pillow python-dotenv \
-    crewai crewai-tools langchain-groq
+    groq httpx python-dotenv \
+    crewai langchain-groq
 
 COPY --chown=user . .
 RUN mkdir -p /home/user/app/assets/music

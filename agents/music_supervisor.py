@@ -175,10 +175,13 @@ def _get_mp3_files(identifier: str) -> list[dict]:
             response.raise_for_status()
             metadata = response.json()
 
-        files = metadata.get("files", {})
+        files = metadata.get("files", [])
+        if not isinstance(files, list):
+            files = []
         mp3s  = []
 
-        for filename, info in files.items():
+        for info in files:
+            filename = info.get("name", "")
             fmt = info.get("format", "").lower()
             if "mp3" in fmt or filename.lower().endswith(".mp3"):
                 # Strip leading slash from filename if present

@@ -67,9 +67,9 @@ async def process_video(
         extract_audio(video_path, audio_path)
         logger.info(f"[STEP 2/5] DONE - Audio extracted in {time.time() - step_start:.2f}s")
 
-        # Step 3: Transcribe with faster-whisper (tiny model)
+        # Step 3: Transcribe with Groq Whisper Large v3 (cloud)
         step_start = time.time()
-        logger.info("[STEP 3/5] Transcribing with faster-whisper (tiny, English)...")
+        logger.info("[STEP 3/5] Transcribing with Groq Whisper Large v3...")
         words = transcription_service.transcribe(audio_path)
         logger.info(f"[STEP 3/5] DONE - {len(words)} words transcribed in {time.time() - step_start:.2f}s")
 

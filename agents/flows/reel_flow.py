@@ -112,10 +112,11 @@ class ReelFlow(Flow[ReelFlowState]):
         for clip_plan in kept_clips:
             idx = clip_plan["clip_index"]
             clip_path = clip_paths[idx]
-            trim_start = float(clip_plan.get("trim_start_sec", 0.0))
-            trim_end = float(clip_plan.get("trim_end_sec", transcripts[idx]["duration_sec"]))
-            trans_out = clip_plan.get("transition_out", "fade")
-            trans_dur = float(clip_plan.get("transition_duration_sec", 0.35))
+            default_dur = transcripts[idx].get("duration_sec") or 0.0
+            trim_start = float(clip_plan.get("trim_start_sec") or 0.0)
+            trim_end = float(clip_plan.get("trim_end_sec") or default_dur)
+            trans_out = clip_plan.get("transition_out") or "fade"
+            trans_dur = float(clip_plan.get("transition_duration_sec") or 0.35)
             ordered_clips.append((clip_path, trim_start, trim_end, trans_out, trans_dur))
 
         all_words = []

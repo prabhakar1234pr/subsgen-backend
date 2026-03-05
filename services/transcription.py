@@ -67,10 +67,13 @@ def transcribe(audio_path: Path) -> list[dict]:
         words = []
         if hasattr(response, "words") and response.words:
             for w in response.words:
+                word = w.get("word", getattr(w, "word", ""))
+                start = w.get("start", getattr(w, "start", 0))
+                end = w.get("end", getattr(w, "end", 0))
                 words.append({
-                    "word": w.word.strip(),
-                    "start": round(float(w.start), 3),
-                    "end": round(float(w.end), 3),
+                    "word": str(word).strip(),
+                    "start": round(float(start), 3),
+                    "end": round(float(end), 3),
                 })
 
         logger.info(f"[TRANSCRIPTION] {len(words)} words from Groq Whisper")
