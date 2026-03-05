@@ -1,6 +1,11 @@
-# Cloud Build: deploy to GCP VM (runs inside GCP, avoids external SSH connection issues)
+# Cloud Build: deploy to GCP VM (runs inside GCP via private pool for internal SSH)
 # Triggered by GitHub Actions via: gcloud builds submit --config=cloudbuild.yaml
 # Expects .env.deploy in the build context (created by the workflow)
+# Uses private pool for VPC access to reach VM via internal IP
+
+options:
+  pool:
+    name: projects/subsgen-backend-488200/locations/us-central1/workerPools/subsgen-pool
 
 steps:
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -12,6 +17,7 @@ steps:
       - subsgen-vm
       - --zone=us-central1-a
       - --project=subsgen-backend-488200
+      - --internal-ip
       - --strict-host-key-checking=no
       - --command=mkdir -p ~/subsgen
 
@@ -25,6 +31,7 @@ steps:
       - subsgen-vm:~/subsgen/.env
       - --zone=us-central1-a
       - --project=subsgen-backend-488200
+      - --internal-ip
       - --strict-host-key-checking=no
 
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -36,6 +43,7 @@ steps:
       - subsgen-vm
       - --zone=us-central1-a
       - --project=subsgen-backend-488200
+      - --internal-ip
       - --strict-host-key-checking=no
       - --command=|
         set -e

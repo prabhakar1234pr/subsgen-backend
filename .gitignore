@@ -32,3 +32,4 @@ Thumbs.db
 # Environment — NEVER commit this
 .env
 key.json
+github-deploy-key.json

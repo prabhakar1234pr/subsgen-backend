@@ -1,5 +1,5 @@
 # Deploy subsgen-backend to GCP Compute Engine VM on push to main
-# Uses Cloud Build (runs inside GCP) to avoid external SSH connection resets
+# Uses direct SSH from GitHub Actions (Cloud Build cannot reach VM from its network)
 # Requires GitHub Secrets: GCP_SA_KEY, GROQ_API_KEY (or GROQ_API_KEY_1/2/3)
 
 name: GCP Deploy
@@ -22,7 +22,7 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Create .env and deploy via Cloud Build
+      - name: Create .env and deploy via SSH
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GROQ_API_KEY_1: ${{ secrets.GROQ_API_KEY_1 }}
@@ -41,4 +41,37 @@ jobs:
             echo "# Deployed $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } > .env.deploy
 
-          gcloud builds submit --config=cloudbuild.yaml --project=subsgen-backend-488200 .
+          gcloud compute ssh subsgen-vm \
+            --zone=us-central1-a \
+            --project=subsgen-backend-488200 \
+            --strict-host-key-checking=no \
+            --ssh-flag="-o ServerAliveInterval=30" \
+            --ssh-flag="-o ServerAliveCountMax=10" \
+            --command="mkdir -p ~/subsgen"
+
+          gcloud compute scp .env.deploy subsgen-vm:~/subsgen/.env \
+            --zone=us-central1-a \
+            --project=subsgen-backend-488200 \
+            --strict-host-key-checking=no \
+            --ssh-flag="-o ServerAliveInterval=30"
+
+          gcloud compute ssh subsgen-vm \
+            --zone=us-central1-a \
+            --project=subsgen-backend-488200 \
+            --strict-host-key-checking=no \
+            --ssh-flag="-o ServerAliveInterval=30" \
+            --command="
+              set -e
+              mkdir -p ~/subsgen
+              cd ~/subsgen
+              if [ ! -d .git ]; then
+                git clone https://github.com/prabhakar1234pr/subsgen-backend.git .
+              fi
+              git fetch origin main
+              git reset --hard origin/main
+              sudo docker build -t subsgen-api .
+              sudo docker stop subsgen 2>/dev/null || true
+              sudo docker rm subsgen 2>/dev/null || true
+              sudo docker run -d --name subsgen --restart unless-stopped -p 7860:7860 --env-file .env subsgen-api
+              echo Deploy complete.
+            "
