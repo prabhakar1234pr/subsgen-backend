@@ -44,22 +44,21 @@ jobs:
           gcloud compute ssh subsgen-vm \
             --zone=us-central1-a \
             --project=subsgen-backend-488200 \
+            --tunnel-through-iap \
             --strict-host-key-checking=no \
-            --ssh-flag="-o ServerAliveInterval=30" \
-            --ssh-flag="-o ServerAliveCountMax=10" \
             --command="mkdir -p ~/subsgen"
 
           gcloud compute scp .env.deploy subsgen-vm:~/subsgen/.env \
             --zone=us-central1-a \
             --project=subsgen-backend-488200 \
-            --strict-host-key-checking=no \
-            --ssh-flag="-o ServerAliveInterval=30"
+            --tunnel-through-iap \
+            --strict-host-key-checking=no
 
           gcloud compute ssh subsgen-vm \
             --zone=us-central1-a \
             --project=subsgen-backend-488200 \
+            --tunnel-through-iap \
             --strict-host-key-checking=no \
-            --ssh-flag="-o ServerAliveInterval=30" \
             --command="
               set -e
               mkdir -p ~/subsgen
