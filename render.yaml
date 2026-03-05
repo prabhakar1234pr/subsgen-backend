@@ -1,0 +1,21 @@
+# Render Blueprint - SubsGen API
+# Deploy: Connect this repo at https://dashboard.render.com/ → New → Blueprint
+# Add GROQ keys as env vars in the Dashboard (Settings → Environment)
+
+services:
+  - type: web
+    runtime: docker
+    name: subsgen-api
+    plan: free
+    region: oregon
+    healthCheckPath: /api/health
+    envVars:
+      # Use GROQ_API_KEY_1/2/3 (recommended) OR GROQ_API_KEY - add values in Render Dashboard
+      - key: GROQ_API_KEY_1
+        sync: false
+      - key: GROQ_API_KEY_2
+        sync: false
+      - key: GROQ_API_KEY_3
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
