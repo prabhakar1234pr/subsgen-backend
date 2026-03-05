@@ -18,6 +18,14 @@ GCP is ready. Add these in GitHub:
 |----------|-------|
 | **GCP_PROJECT_ID** | `subsgen-run-p554` |
 | **GCP_REGION** | `us-central1` |
+| **GCS_BUCKET** | `subsgen-reels-subsgen-run-p554` (auto-created on first deploy) |
+
+**Note:** The deploy SA needs `roles/storage.admin` to create the GCS bucket. If you set up GCP before this, run:
+```bash
+gcloud projects add-iam-policy-binding subsgen-run-p554 \
+  --member="serviceAccount:github-deploy@subsgen-run-p554.iam.gserviceaccount.com" \
+  --role="roles/storage.admin"
+```
 
 ## 3. Push to main
 

@@ -10,6 +10,7 @@ on:
 env:
   GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'subsgen-run-p554' }}
   GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+  GCS_BUCKET: ${{ vars.GCS_BUCKET || 'subsgen-reels-subsgen-run-p554' }}
   SERVICE_NAME: subsgen-api
   IMAGE_NAME: subsgen-api
 
@@ -33,6 +34,20 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Create GCS bucket (if not exists)
+        run: |
+          gcloud services enable storage.googleapis.com --quiet
+          BUCKET="${{ env.GCS_BUCKET }}"
+          gcloud storage buckets describe "gs://$BUCKET" 2>/dev/null || {
+            gcloud storage buckets create "gs://$BUCKET" --location=${{ env.GCP_REGION }}
+            echo '{"lifecycle":{"rule":[{"action":{"type":"Delete"},"condition":{"age":1}}]}}' > /tmp/lifecycle.json
+            gcloud storage buckets update "gs://$BUCKET" --lifecycle-file=/tmp/lifecycle.json
+            PROJ_NUM=$(gcloud projects describe ${{ env.GCP_PROJECT_ID }} --format='value(projectNumber)')
+            gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
+              --member="serviceAccount:${PROJ_NUM}-compute@developer.gserviceaccount.com" \
+              --role="roles/storage.objectAdmin"
+          }
+
       - name: Authenticate Docker to Artifact Registry
         run: |
           gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS"
@@ -47,7 +62,7 @@ jobs:
 
       - name: Deploy to Cloud Run
         run: |
-          ENV_VARS="GROQ_API_KEY_1=${{ secrets.GROQ_API_KEY_1 }},GROQ_API_KEY_2=${{ secrets.GROQ_API_KEY_2 }},GROQ_API_KEY_3=${{ secrets.GROQ_API_KEY_3 }},GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}"
+          ENV_VARS="GROQ_API_KEY_1=${{ secrets.GROQ_API_KEY_1 }},GROQ_API_KEY_2=${{ secrets.GROQ_API_KEY_2 }},GROQ_API_KEY_3=${{ secrets.GROQ_API_KEY_3 }},GROQ_API_KEY=${{ secrets.GROQ_API_KEY }},GCS_BUCKET=${{ env.GCS_BUCKET }}"
           gcloud run deploy ${{ env.SERVICE_NAME }} \
             --image ${{ env.IMAGE_URI }} \
             --platform managed \

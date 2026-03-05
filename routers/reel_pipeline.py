@@ -20,7 +20,7 @@ import os
 import time
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from agents.flows            import run_reel_flow
 from agents.key_manager      import has_keys, key_count
@@ -28,6 +28,7 @@ from services.subtitle       import generate_ass_subtitles, burn_subtitles, get_
 from services.video_editor   import produce_reel
 from services.audio_master   import mix_with_ducking
 from services.music_selector import mix_music
+from services.gcs_upload     import upload_and_get_signed_url
 from utils.file_handler      import TempFileHandler
 
 logger     = logging.getLogger(__name__)
@@ -153,12 +154,23 @@ async def process_reel_pipeline(
         logger.info(f"[PIPELINE COMPLETE] {size_mb:.1f}MB in {time.time()-wall:.1f}s total")
         logger.info(f"[PIPELINE] Caption hook: \"{caption.get('hook','')}\" | CTA: \"{caption.get('cta','')}\"")
 
-        # Encode caption into response header so frontend can display it
+        gcs_bucket = os.environ.get("GCS_BUCKET")
+        if gcs_bucket:
+            # Upload to GCS, return JSON with signed URL (2h expiry; bucket lifecycle deletes after 24h)
+            download_url = upload_and_get_signed_url(final, gcs_bucket)
+            background_tasks.add_task(handler.cleanup_file, final)
+            return JSONResponse(
+                content={
+                    "download_url": download_url,
+                    "caption": caption,
+                    "subtitle_style": subtitle_style,
+                    "music_mood": edit_plan.get("music_mood", ""),
+                }
+            )
+
+        # Local dev: return file directly (no 32MB limit locally)
         caption_header = json.dumps(caption, ensure_ascii=False)
-
-        # Cleanup final file after response is sent
         background_tasks.add_task(handler.cleanup_file, final)
-
         return FileResponse(
             path        = str(final),
             media_type  = "video/mp4",
