@@ -163,16 +163,22 @@ def concat_with_agent_transitions(
     transitions: list[tuple[str, float]],  # (xfade_type, xfade_sec) per clip (transition OUT of that clip)
     output_path: Path,
 ) -> Path:
-    """Concat with per-segment agent-chosen transitions. transitions[i] = transition from clip i to clip i+1."""
+    """Concat with agent-chosen transitions. Use 'none' for hard cuts (simple concat)."""
     if len(clip_paths) == 1:
         subprocess.run(["ffmpeg", "-i", str(clip_paths[0]), "-c", "copy",
                         "-y", str(output_path)], check=True, capture_output=True)
         return output_path
 
-    # Use first transition for all (or blend); FFmpeg xfade uses same type per segment
-    xfade_type = transitions[0][0].lower().replace(" ", "_").replace("-", "")
+    # "none" = hard cut, no transition
+    xfade_type = (transitions[0][0] or "none").lower().replace(" ", "_").replace("-", "")
+    if xfade_type == "none":
+        logger.info("[VIDEO_EDIT] Using hard cuts (no transitions)")
+        return _simple_concat(clip_paths, output_path)
+
     if xfade_type not in VALID_XFADE:
-        raise ValueError(f"[VideoEditor] Invalid transition '{transitions[0][0]}' — must be one of: {sorted(VALID_XFADE)}")
+        logger.warning(f"[VIDEO_EDIT] Invalid transition '{xfade_type}' — using hard cut")
+        return _simple_concat(clip_paths, output_path)
+
     xfade_sec = transitions[0][1]
     return concat_with_crossfade(clip_paths, output_path, xfade_sec=xfade_sec, xfade_type=xfade_type)
 

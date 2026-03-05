@@ -39,9 +39,11 @@ SCORING: keep_score 1-10. Below 4 = cut. Prefer strong hooks, clear speech, good
 
 NARRATIVE: Hook first, value middle, CTA end. Trim filler ("um", "so") — give exact start_sec/end_sec.
 
-TRANSITIONS (per kept clip): Pick what fits the energy. Use FFmpeg xfade types directly:
-- transition_in, transition_out: any of [{ffmpeg_transitions}]
-- transition_duration_sec: 0.2 to 0.8 (your choice)
+TRANSITIONS: Use ONLY when necessary. Prefer "none" for hard cuts — most clips should use transition_out: "none".
+Only use fade/wipe/slide when a clear scene change or mood shift benefits from a transition (e.g. hook→value, value→CTA).
+- transition_in, transition_out: "none" (hard cut) OR any of [{ffmpeg_transitions}]
+- When "none": no transition, direct cut. Default to "none" unless transition adds clear value.
+- transition_duration_sec: 0.2 to 0.5 when not "none"
 - pacing_note: "quick_cut" | "hold" | "normal"
 
 CREATIVE: creative_direction, music_volume, duck_strength, music_fade_in_sec, music_fade_out_sec — all your choice.
@@ -64,9 +66,9 @@ Respond ONLY with valid JSON. No markdown. Every field is required (except subti
       "trim_start_sec": 1.4,
       "trim_end_sec": 18.2,
       "trim_reason": "skip filler",
-      "transition_in": "fade",
-      "transition_out": "fade",
-      "transition_duration_sec": 0.35,
+      "transition_in": "none",
+      "transition_out": "none",
+      "transition_duration_sec": 0.3,
       "pacing_note": "normal"
     }}
   ],

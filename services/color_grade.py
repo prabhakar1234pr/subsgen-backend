@@ -11,13 +11,14 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # FFmpeg eq filter: brightness (-1..1), contrast (default 1), saturation (default 1)
+# Presets are noticeable but not overdone
 PRESETS = {
-    "warm": "eq=brightness=0.03:contrast=1.05:saturation=1.15:gamma=1.05",
-    "cool": "eq=brightness=0.02:contrast=1.05:saturation=0.9:gamma=0.98",
-    "cinematic": "eq=contrast=1.15:saturation=0.85:gamma=1.02",
-    "vibrant": "eq=contrast=1.08:saturation=1.25",
-    "muted": "eq=saturation=0.7:contrast=0.95",
-    "high_contrast": "eq=contrast=1.2:saturation=1.05",
+    "warm": "eq=brightness=0.04:contrast=1.08:saturation=1.2:gamma=1.08",
+    "cool": "eq=brightness=0.02:contrast=1.08:saturation=0.88:gamma=0.95",
+    "cinematic": "eq=contrast=1.18:saturation=0.82:gamma=1.05",
+    "vibrant": "eq=contrast=1.1:saturation=1.3",
+    "muted": "eq=saturation=0.65:contrast=0.92",
+    "high_contrast": "eq=contrast=1.25:saturation=1.08",
     "neutral": "eq=contrast=1.02:saturation=1.02",
 }
 

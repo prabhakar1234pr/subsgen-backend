@@ -50,7 +50,7 @@ class TestReelFlowE2E:
             assert isinstance(trim_start, (int, float))
             assert isinstance(trim_end, (int, float))
             assert trans_out in (
-                "fade", "wipeleft", "wiperight", "wipeup", "wipedown",
+                "none", "fade", "wipeleft", "wiperight", "wipeup", "wipedown",
                 "slideleft", "slideright", "slideup", "slidedown",
                 "rectcrop", "distance", "fadeblack", "fadewhite",
             )

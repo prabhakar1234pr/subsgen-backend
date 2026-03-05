@@ -81,8 +81,8 @@ def run_reel_flow(clip_paths: list[Path]) -> dict:
         dur = transcripts[idx].get("duration_sec") or 0.0
         trim_start = clip_plan.get("trim_start_sec")
         trim_end = clip_plan.get("trim_end_sec")
-        trans_out = clip_plan.get("transition_out") or "fade"
-        trans_dur = clip_plan.get("transition_duration_sec") or 0.35
+        trans_out = clip_plan.get("transition_out") or "none"
+        trans_dur = clip_plan.get("transition_duration_sec") or 0.3
         if trim_start is None or trim_end is None:
             logger.warning(f"[ReelFlow] Clip {idx} missing trim — using full clip (0 to {dur:.1f}s)")
             trim_start, trim_end = 0.0, dur

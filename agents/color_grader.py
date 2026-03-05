@@ -23,15 +23,17 @@ The video director has decided:
   Creative direction: {creative_direction}
   Content type: {content_type}
 
-Pick ONE color grading preset that fits the vibe. Options: [{presets}]
+Pick ONE color grading preset. Options: [{presets}]
 
-- warm: golden, inviting, lifestyle
-- cool: blue tones, tech, calm
-- cinematic: film look, contrast, drama
-- vibrant: punchy, saturated, energetic
-- muted: desaturated, soft, minimal
-- high_contrast: bold, punchy, dramatic
-- neutral: minimal correction, natural
+- warm: golden, inviting (motivational, lifestyle)
+- cool: blue tones (tech, calm, educational)
+- cinematic: film look, drama (storytelling)
+- vibrant: punchy, saturated (energy, hype)
+- muted: desaturated, soft (minimal, calm)
+- high_contrast: bold, dramatic
+- neutral: no grading, pass-through (use only if content is already perfect)
+
+IMPORTANT: Avoid "neutral" — prefer warm, cool, cinematic, or vibrant to add mood. Only use neutral for raw/authentic content that should stay untouched.
 
 Respond ONLY with valid JSON. No markdown.
 {{"color_preset": "warm", "reason": "one sentence"}}"""

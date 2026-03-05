@@ -122,11 +122,15 @@ async def process_reel_pipeline(
             handler.cleanup_file(item[0])
         logger.info(f"[PIPELINE] Step 3 done: Reel produced in {time.time()-t_edit:.1f}s")
 
-        # ── 3b. Color grading ───────────────────────────────────────────
-        graded = handler.create_temp_path(".mp4")
-        apply_color_grade(stitched, graded, preset=color_preset)
-        handler.cleanup_file(stitched)
-        stitched = graded
+        # ── 3b. Color grading (skip when neutral = no visible change) ─────
+        if color_preset and color_preset.lower() != "neutral":
+            graded = handler.create_temp_path(".mp4")
+            apply_color_grade(stitched, graded, preset=color_preset)
+            handler.cleanup_file(stitched)
+            stitched = graded
+            logger.info(f"[PIPELINE] Color graded: {color_preset}")
+        else:
+            logger.info("[PIPELINE] Color: neutral (skip grading)")
 
         # ── 4. Mix music (with ducking when speech present) ──────────────
         with_music = handler.create_temp_path(".mp4")
