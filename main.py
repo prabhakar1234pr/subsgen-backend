@@ -21,7 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger("subsgen")
 
 # Reduce noise from third-party libs (crewai, httpx, etc.)
-for name in ("httpx", "httpcore", "urllib3", "openai", "langchain", "crewai"):
+for name in ("httpx", "httpcore", "urllib3", "openai"):
     logging.getLogger(name).setLevel(logging.WARNING)
 
 app = FastAPI(

@@ -21,7 +21,6 @@ ENV PATH="/home/user/app/.venv/bin:$PATH"
 RUN uv pip install --python /home/user/app/.venv/bin/python \
     fastapi "uvicorn[standard]" python-multipart \
     groq httpx python-dotenv \
-    crewai langchain-groq \
     google-cloud-storage
 
 COPY --chown=user . .

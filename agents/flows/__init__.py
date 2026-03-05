@@ -1,9 +1,9 @@
 """
 agents/flows/
 
-CrewAI Flow orchestration for the AI reel pipeline.
+AI reel pipeline orchestration.
 """
 
-from agents.flows.reel_flow import ReelFlow, run_reel_flow
+from agents.flows.reel_flow import run_reel_flow
 
-__all__ = ["ReelFlow", "run_reel_flow"]
+__all__ = ["run_reel_flow"]
