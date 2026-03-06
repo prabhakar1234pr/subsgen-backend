@@ -69,6 +69,20 @@ async def process_reel_pipeline(
     if not videos:
         raise HTTPException(status_code=400, detail="No videos uploaded")
 
+    # Validate: only videos allowed, warn if photos
+    for v in videos:
+        ct = (v.content_type or "").lower()
+        if ct.startswith("image/"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Photos are not supported. '{v.filename or 'file'}' appears to be an image. Please upload videos only (e.g. MP4, WebM).",
+            )
+        if ct and not ct.startswith("video/"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only videos allowed. '{v.filename or 'file'}' has type {ct}. Please upload videos (MP4, WebM, etc.).",
+            )
+
     handler = TempFileHandler()
     wall    = time.time()
 

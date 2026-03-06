@@ -35,8 +35,10 @@ async def process_video(
     5. Return processed video
     """
     logger.info(f"[VIDEO] POST /process | file={video.filename} | style={style} | content_type={video.content_type}")
-    # Validate file type
-    if not video.content_type or not video.content_type.startswith("video/"):
+    ct = (video.content_type or "").lower()
+    if ct.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Photos are not supported. Please upload a video (MP4, WebM, etc.).")
+    if not ct or not ct.startswith("video/"):
         raise HTTPException(status_code=400, detail="File must be a video")
 
     file_handler = TempFileHandler()
@@ -141,22 +143,27 @@ async def process_video(
 
 @router.post("/process-reel")
 async def process_reel(
+    background_tasks: BackgroundTasks,
     videos: list[UploadFile] = File(...),
     style: str = Form("hormozi")
 ):
+    """
+    Process one video (subtitles only). Only 1 video allowed.
+    """
+    if len(videos) != 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Only 1 video allowed. Please upload a single video.",
+        )
     logger.info(f"[VIDEO] POST /process-reel | count={len(videos)} | style={style}")
-    """
-    Process multiple videos at once:
-    1. Extract audio from each
-    2. Transcribe with Whisper
-    3. Generate word-by-word subtitles
-    4. Burn subtitles onto each video
-    5. Return ZIP with all processed videos
-    """
+
     video_contents: list[tuple[str, bytes]] = []
     total_size = 0
     for i, v in enumerate(videos):
-        if not v.content_type or not v.content_type.startswith("video/"):
+        ct = (v.content_type or "").lower()
+        if ct.startswith("image/"):
+            raise HTTPException(status_code=400, detail=f"Photos are not supported. '{v.filename or 'file'}' appears to be an image. Please upload videos only.")
+        if not ct or not ct.startswith("video/"):
             raise HTTPException(status_code=400, detail=f"File must be a video: {v.filename}")
         key = v.filename or f"video_{i}.mp4"
         content = await v.read()
@@ -190,14 +197,14 @@ async def process_reel(
     processed_paths: list[tuple[str, Path]] = []
 
     try:
-        for i, video in enumerate(videos):
+        for i, (key, content) in enumerate(video_contents):
             step_start = time.time()
-            base_name = Path(video.filename or f"video_{i}.mp4").stem
-            video_ext = os.path.splitext(video.filename or ".mp4")[1]
+            base_name = Path(key).stem
+            video_ext = os.path.splitext(key)[1] or ".mp4"
 
-            logger.info(f"[{i+1}/{len(videos)}] Processing: {video.filename}")
+            logger.info(f"[{i+1}/{len(videos)}] Processing: {key}")
 
-            video_path = file_handler.save_upload(video.content, video_ext)
+            video_path = file_handler.save_upload(content, video_ext)
             audio_path = file_handler.create_temp_path(".wav")
             extract_audio(video_path, audio_path)
 
@@ -219,22 +226,17 @@ async def process_reel(
             processed_paths.append((out_name, output_path))
             logger.info(f"[{i+1}/{len(videos)}] DONE in {time.time() - step_start:.2f}s")
 
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            for name, path in processed_paths:
-                zf.write(path, name)
-
-        for _, path in processed_paths:
-            file_handler.cleanup_file(path)
-
-        zip_buffer.seek(0)
         total_time = time.time() - total_start
-        logger.info(f"[SUCCESS] Processed {len(video_contents)} videos in {total_time:.2f}s")
+        logger.info(f"[SUCCESS] Processed {len(video_contents)} video(s) in {total_time:.2f}s")
 
-        return Response(
-            content=zip_buffer.getvalue(),
-            media_type="application/zip",
-            headers={"Content-Disposition": "attachment; filename=subtitled_videos.zip"}
+        # Single video: return file directly
+        out_name, output_path = processed_paths[0]
+        background_tasks.add_task(file_handler.cleanup_file, output_path)
+        return FileResponse(
+            path=str(output_path),
+            media_type="video/mp4",
+            filename=out_name,
+            background=background_tasks,
         )
 
     except HTTPException:
